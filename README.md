@@ -59,7 +59,7 @@ geodata/
 │   ├── peaks_template.csv        # Template for mountain summits / relay sites
 │   ├── radars_template.csv       # Template for surveillance radars (PSR, SSR, Mode S)
 │   └── navaids_template.csv      # Template for radio navigation aids (VOR & DME)
-├── tests/                        # AUTOMATED TEST SUITE (40 tests)
+├── tests/                        # AUTOMATED TEST SUITE (43 tests)
 ├── data/                         # OUTPUT DATABASE & PRECALCULATED STATE (Git-ignored)
 │   ├── euro_geodatabase.duckdb   # DuckDB database file
 │   └── custom_facilities.json    # User-created stations
@@ -232,6 +232,16 @@ Open your browser to:
      python scripts/ingest_custom_data.py --file templates/navaids_custom.csv --type NAVAID
      ```
 
+6. **3D Airspace Coverage Volume Modal (🧊)**:
+   - Real-time WebGL volumetric 3D solid mesh of any radar, VOR, or DME site's airspace coverage volume powered by Three.js and OrbitControls.
+   - **Outer Jagged Terrain Shell**: 3D faceted geometry following the exact mountain terrain horizon cutoffs across all altitude slices up to FL600.
+   - **Inverted Zenith Silence Cone**: Accurately renders the radar cone of silence ($34^\circ$) or DME lower beam cutoff ($30^\circ$) as an inner void funnel.
+   - **Ground Reference & Range Rings**: Concentric metric/nautical distance rings, cardinal compass orientation ($N, S, E, W$), and antenna mast with a beacon at the origin.
+   - **Controls & Live Integration**: Variable vertical exaggeration (1x to 10x), material shader themes (Hologram Cyan, Radar Emerald, Sunset Amber, Tactical Wireframe), turntable auto-rotation, and integrated 3D volumetric airspace calculations in $\text{km}^3$.
+
+   ![Klagenfurt VOR/DME 3D Airspace Coverage Volume](screenshots/Klagenfurt%20VORDME%203d%20Coverage%20Volume.png)
+   *Figure 5: Klagenfurt VOR/DME (KFT) 3D Airspace Coverage Volume Modal — Interactive Three.js WebGL solid mesh showing the outer terrain-cut jagged shell bounded by Alpine peaks across FL010–FL600, inner overhead cone of silence funnel, ground compass range rings, and total integrated airspace volume calculation (km³).*
+
 ---
 
 ## REST API Reference
@@ -240,6 +250,7 @@ Open your browser to:
 | :--- | :--- | :--- |
 | `/api/facilities` | `GET` | List/search all radars, navaids, custom stations, and peaks with country and category filters. |
 | `/api/facilities/coverage` | `GET` | Retrieve precalculated over-the-horizon coverage, radial cut spokes, and perimeters dynamically evaluated at any FL and range cap. |
+| `/api/facilities/{facility_id}/volume-3d` | `GET` | Compute 3D volumetric coverage slices, terrain boundary radii, cone of silence, and total airspace volume (km³). |
 | `/api/facilities/countries` | `GET` | Summary breakdown of radars and navaids across ECAC countries. |
 | `/api/facilities/custom` | `GET` / `POST` | List or create custom user stations with automatic DEM enrichment and FL600 horizon precalc. |
 | `/api/facilities/custom/{id}` | `DELETE` | Delete a custom facility. |
@@ -255,7 +266,7 @@ Open your browser to:
 
 ## Verification & Automated Tests
 
-Run the full test suite (42 unit and integration tests):
+Run the full test suite (43 unit and integration tests):
 
 ```powershell
 python -m unittest discover tests
