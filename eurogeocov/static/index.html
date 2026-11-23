@@ -541,7 +541,7 @@
                 <label>Beam Min / Max Elev (&deg;)</label>
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="builderRadarMinElev" value="0.5" step="0.1" title="Lower cutoff">
-                  <input type="number" id="builderRadarMaxElev" value="45.0" step="1.0" title="Cone of silence cutoff">
+                  <input type="number" id="builderRadarMaxElev" value="34.0" step="1.0" title="Zenith cone of silence cutoff ~34°">
                 </div>
               </div>
               <div class="form-group">
@@ -598,6 +598,21 @@
                 <div style="display:flex; gap:6px;">
                   <input type="number" id="builderFreqKhz" value="115000" step="50" placeholder="kHz">
                   <input type="text" id="builderDmeChan" value="95X" placeholder="Ch">
+                </div>
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Vertical Window Min / Max (&deg;)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="builderNavaidMinElev" value="30.0" step="1.0" title="DME lower cutoff (30° window)">
+                  <input type="number" id="builderNavaidMaxElev" value="150.0" step="1.0" title="DME vertical slice limit (150° window)">
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Vertical Slice Model</label>
+                <div style="font-size:10px; color:var(--accent-cyan); padding-top:6px;">
+                  120&deg; Vertical Plane Slice
                 </div>
               </div>
             </div>
@@ -804,26 +819,42 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
             </div>
           </div>
 
-          <!-- 3. Cone of Silence -->
+          <!-- 3. Cone of Silence & Vertical Bounded Slices -->
           <div class="explainer-card">
             <div class="explainer-header">
               <span class="explainer-num">3</span>
               <div>
-                <div class="explainer-title">Radar &amp; Navaid Cone of Silence</div>
-                <div class="explainer-subtitle">Antenna vertical aperture null directly overhead</div>
+                <div class="explainer-title">Radar Silence Cones &amp; DME 120&deg; Vertical Slices</div>
+                <div class="explainer-subtitle">Bounded vertical coverage volumes and aperture limits</div>
               </div>
             </div>
             <p class="explainer-body">
-              Ground-based radar dishes (PSR, SSR, Mode-S) and VOR/DME ground stations have limited vertical beam elevation apertures. Surveillance radars typically scan up to &theta;<sub>max</sub> = 40&deg;&ndash;45&deg;, while TACAN/DMEs transmit up to &theta;<sub>max</sub> = 60&deg;.
+              Ground-based radar dishes (PSR, SSR, Mode-S) and DME/VOR navigation aids transmit within bounded elevation beam windows, leaving dead zones directly overhead (Cone of Silence) and below low-angle cutoffs:
             </p>
+            <div class="explainer-body" style="margin-top:6px;">
+              <b>1. Radar Overhead Cone of Silence (&sim;34&deg; Zenith Angle):</b>
+              <br>Air traffic surveillance radars typically scan between a low-angle cutoff &theta;<sub>min</sub> &approx; 0.5&deg; and an upper elevation cutoff &theta;<sub>max</sub> &approx; 34&deg; (corresponding to a 34&deg; zenith cone half-angle directly overhead). Any aircraft flying at elevation angles &theta; &gt; 34&deg; enters the antenna silence cone.
+            </div>
             <div class="explainer-formula">
-              &theta; = arctan[ (h<sub>aircraft</sub> &minus; h<sub>station</sub>) / d<sub>ground</sub> ] &minus; (d<sub>ground</sub> / (2 R'))
+              r<sub>cone</sub> = (h &minus; h<sub>station</sub>) / tan(34&deg;)
             </div>
             <p class="explainer-body">
-              When the elevation angle exceeds &theta;<sub>max</sub> (&theta; &gt; &theta;<sub>max</sub>), the target enters the <b>Cone of Silence</b> blind zone directly above the facility antenna. The dead cone radius at altitude h is:
+              At FL300 (h &minus; h<sub>sta</sub> &approx; 9,144m), the radar blind radius directly overhead is r<sub>cone</sub> &approx; 13.5 km (7.3 NM).
             </p>
+            <div class="explainer-body" style="margin-top:8px;">
+              <b>2. DME 120&deg; Vertical Plane Window (30&deg;&ndash;150&deg; Slice):</b>
+              <br>DME transmissions are bounded in a 120&deg; slice through the vertical plane from the site between 30&deg; and 150&deg;. A beam below 30&deg; elevation angle (&theta; &lt; 30&deg;) is not covered, and symmetrically above 150&deg; in the vertical plane (below 30&deg; on the opposite side) is not covered. The covered airspace is thus contained in a 120&deg; cone/slice through the vertical plane:
+            </div>
             <div class="explainer-formula">
-              r<sub>cone</sub> = (h &minus; h<sub>station</sub>) / tan(&theta;<sub>max</sub>)
+              Window: 30&deg; &le; &theta;<sub>vert</sub> &le; 150&deg; &nbsp;&implies;&nbsp; &Delta;&theta; = 120&deg; Vertical Slice<br>
+              r<sub>outer,beam</sub> = (h &minus; h<sub>station</sub>) / tan(30&deg;)
+            </div>
+            <div class="explainer-body" style="margin-top:8px;">
+              <b>3. Bounded Vertical Airspace Annulus:</b>
+              <br>At any given flight level h, ground-based equipment with both minimum and maximum elevation beam angles serves a strictly bounded horizontal annulus:
+            </div>
+            <div class="explainer-formula">
+              r<sub>inner</sub> = (h &minus; h<sub>sta</sub>) / tan(&theta;<sub>max</sub>) &nbsp;&le;&nbsp; d &nbsp;&le;&nbsp; r<sub>outer</sub> = min[ R<sub>DOC</sub>, (h &minus; h<sub>sta</sub>) / tan(&theta;<sub>min</sub>) ]
             </div>
           </div>
 

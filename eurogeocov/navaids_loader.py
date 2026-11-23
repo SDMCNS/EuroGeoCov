@@ -180,7 +180,7 @@ class NavaidsAndRadarsLoader:
                     "doc_ceiling_ft": doc_ceiling_ft,
                     "azimuth_start_deg": 0.0,
                     "azimuth_end_deg": 360.0,
-                    "elevation_min_deg": 0.5,
+                    "elevation_min_deg": 30.0 if (nav_type or "").upper() == "DME" else 0.5,
                     "elevation_max_deg": 60.0,
                 }
                 navaids.append(record)
@@ -300,7 +300,7 @@ class NavaidsAndRadarsLoader:
                 "azimuth_start_deg": 0.0,
                 "azimuth_end_deg": 360.0,
                 "elevation_min_deg": 0.5,
-                "elevation_max_deg": 35.0,
+                "elevation_max_deg": 34.0,  # ATC Radar upper cutoff / ~34° zenith cone angle
                 "source": props.get("source", "")
             }
             radars.append(record)

@@ -109,15 +109,15 @@ Zugspitze,47.4211,10.9853,2962,DE
 ### 2. Surveillance Radars Template (`templates/radars_template.csv`)
 ```csv
 ident,name,country,latitude,longitude,mast_height_m,range_nm,azimuth_start_deg,azimuth_end_deg,elevation_min_deg,elevation_max_deg,type,mode_s
-RAD_PARIS_N,Paris Nord En-route Radar,FR,49.0097,2.5479,25.0,200.0,0.0,360.0,0.5,45.0,ENR-MDS,true
-RAD_MUC_TMA,Munich Terminal Area Radar,DE,48.3538,11.7861,30.0,60.0,0.0,360.0,0.5,45.0,SSR,true
+RAD_PARIS_N,Paris Nord En-route Radar,FR,49.0097,2.5479,25.0,200.0,0.0,360.0,0.5,34.0,ENR-MDS,true
+RAD_MUC_TMA,Munich Terminal Area Radar,DE,48.3538,11.7861,30.0,60.0,0.0,360.0,0.5,34.0,SSR,true
 ```
 
 ### 3. Navaids Template (`templates/navaids_template.csv`)
 ```csv
-ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_max_deg
-LAM,Lambourne,GB,51.6464,0.1517,VOR-DME,ENROUTE,HIGH,320,115600,103X,130.0,60.0
-KLO,Kloten,CH,47.4583,8.5489,VOR-DME,TMA,LOW,1420,114850,95Y,40.0,60.0
+ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_min_deg,elevation_max_deg
+LAM,Lambourne,GB,51.6464,0.1517,VOR-DME,ENROUTE,HIGH,320,115600,103X,130.0,30.0,150.0
+KLO,Kloten,CH,47.4583,8.5489,VOR-DME,TMA,LOW,1420,114850,95Y,40.0,30.0,150.0
 ```
 
 ### 4. Running the Ingestion CLI
@@ -216,7 +216,8 @@ Open your browser to:
    - Comprehensive guide to the underlying physics and mathematics:
      - $4/3$ Earth Radius ($R' \approx 8,495\text{ km}$) and Earth bulge formula $\Delta h = \frac{d_1 d_2}{2 R'}$.
      - First Fresnel Zone ($F_1$) radius and the $60\%$ clearance criterion ($0.6 \cdot F_1$).
-     - Antenna Cone of Silence dead cone geometry ($\theta_{\text{max}}$) and radius $r_{\text{cone}} = \frac{h - h_{\text{sta}}}{\tan \theta_{\text{max}}}$.
+     - **Radar Zenith Cone of Silence ($\sim 34.0^\circ$)**: Surveillance radars possess an upper beam cutoff with an overhead zenith cone angle of $\sim 34^\circ$. Targets above this elevation angle are in the silent null, forming an inner dead radius $r_{\text{inner}} = \frac{\Delta h}{\tan(34.0^\circ)}$.
+     - **DME $30^\circ\text{--}150^\circ$ ($120^\circ$ Vertical Slice) Window**: DME antenna coverage is physically bounded within a $30^\circ\text{--}150^\circ$ vertical plane window ($120^\circ$ vertical slice centered at zenith). Signals below $30^\circ$ elevation angle are not covered (`BELOW_BEAM_MIN`), creating a bounded vertical annulus $[r_{\text{inner}}, r_{\text{outer}}]$ where $r_{\text{outer}} = \min(R_{\text{DOC}}, \frac{\Delta h}{\tan(30^\circ)})$.
      - Friis Free Space Path Loss (FSPL) and ITU-R P.526 knife-edge obstacle diffraction loss $J(v)$.
      - Airspace voxelization, coverage floor, and multi-sensor redundancy tiers ($N$-Coverage).
 5. **Dataset Builder & CLI Exporter Tab (🛠️)**:
@@ -243,10 +244,6 @@ Open your browser to:
 | `/api/facilities/custom/{id}` | `DELETE` | Delete a custom facility. |
 | `/api/export/template` | `POST` | Format and export a list of facilities as a CSV template ready for CLI ingestion. |
 | `/api/airspace/cube` | `POST` | Assess radio coverage at any single 1,000-ft cube in Earth's airspace. |
-| `/api/facilities/countries` | `GET` | Summary breakdown of radars and navaids across ECAC countries. |
-| `/api/facilities/custom` | `GET` / `POST` | List or create custom user stations with automatic DEM enrichment and FL600 horizon precalc. |
-| `/api/facilities/custom/{id}` | `DELETE` | Delete a custom station. |
-| `/api/airspace/cube` | `POST` | Assess radio coverage at any single 1,000-ft cube in Earth's airspace. |
 | `/api/airspace/column` | `POST` | Scan a vertical stack of 1,000-ft cubes (FL010 to FL600) over a coordinate to find the coverage floor and diagnose blocking. |
 | `/api/airspace/conical-coverage` | `POST` | On-the-fly conical horizontal slice coverage computation. |
 | `/api/los/profile` | `POST` | High-resolution point-to-point Line of Sight, Earth curvature, Fresnel zone, and terrain profile. |
@@ -257,7 +254,7 @@ Open your browser to:
 
 ## Verification & Automated Tests
 
-Run the full test suite (40 unit and integration tests):
+Run the full test suite (42 unit and integration tests):
 
 ```powershell
 python -m unittest discover tests

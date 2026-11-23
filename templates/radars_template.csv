@@ -10,13 +10,13 @@ ident,name,country,latitude,longitude,mast_height_m,range_nm,azimuth_start_deg,a
 # azimuth_start_deg: Azimuth sector start in degrees true (default: 0.0)
 # azimuth_end_deg: Azimuth sector end in degrees true (default: 360.0 for omnidirectional 360-degree coverage)
 # elevation_min_deg: Antenna lower 3dB beam cutoff angle (default: 0.5 degrees)
-# elevation_max_deg: Antenna upper beam cutoff / Cone of Silence cutoff angle (default: 45.0 degrees)
+# elevation_max_deg: Antenna upper beam cutoff / Zenith Cone of Silence angle (default: 34.0 degrees)
 # type: Equipment type: 'PSR' (Primary), 'SSR' (Secondary), 'MODE-S', or 'ENR-MDS' (Enroute Mode S)
 # mode_s: Mode S capability boolean ('true' or 'false')
 #
 # Examples:
-RAD_PARIS_N,Paris Nord En-route Radar,FR,49.0097,2.5479,25.0,200.0,0.0,360.0,0.5,45.0,ENR-MDS,true
-RAD_MUC_TMA,Munich Terminal Area Radar,DE,48.3538,11.7861,30.0,60.0,0.0,360.0,0.5,45.0,SSR,true
-RAD_ZUR_PSR,Zurich Primary Surveillance,CH,47.4582,8.5555,20.0,150.0,0.0,360.0,0.5,45.0,PSR,false
-RAD_ROM_APP,Rome Fiumicino Approach,IT,41.8003,12.2389,25.0,80.0,0.0,360.0,0.5,45.0,MODE-S,true
-RAD_AMS_ENR,Amsterdam Schiphol Enroute,NL,52.3105,4.7683,28.0,220.0,0.0,360.0,0.5,45.0,ENR-MDS,true
+RAD_PARIS_N,Paris Nord En-route Radar,FR,49.0097,2.5479,25.0,200.0,0.0,360.0,0.5,34.0,ENR-MDS,true
+RAD_MUC_TMA,Munich Terminal Area Radar,DE,48.3538,11.7861,30.0,60.0,0.0,360.0,0.5,34.0,SSR,true
+RAD_ZUR_PSR,Zurich Primary Surveillance,CH,47.4582,8.5555,20.0,150.0,0.0,360.0,0.5,34.0,PSR,false
+RAD_ROM_APP,Rome Fiumicino Approach,IT,41.8003,12.2389,25.0,80.0,0.0,360.0,0.5,34.0,MODE-S,true
+RAD_AMS_ENR,Amsterdam Schiphol Enroute,NL,52.3105,4.7683,28.0,220.0,0.0,360.0,0.5,34.0,ENR-MDS,true

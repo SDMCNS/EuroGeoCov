@@ -84,6 +84,7 @@ class PropagationEngine:
         num_points: int = 250,
         tx_is_agl: bool = False,
         rx_is_agl: bool = False,
+        elevation_min_deg: float = 0.5,
         cone_of_silence_deg: float = DEFAULT_CONE_OF_SILENCE_ANGLE_DEG,
         max_flight_level_ft: float = DEFAULT_MAX_FLIGHT_LEVEL_FT,
         max_operational_range_km: float = DEFAULT_MAX_OPERATIONAL_RANGE_KM,
@@ -171,6 +172,7 @@ class PropagationEngine:
         elevation_angle_deg = math.degrees(elevation_angle_rad)
 
         in_cone_of_silence = elevation_angle_deg > cone_of_silence_deg
+        below_min_elevation = elevation_angle_deg < elevation_min_deg
 
         # 6. Service Volume Limits
         exceeds_max_fl = rx_amsl_ft > max_flight_level_ft
@@ -222,6 +224,8 @@ class PropagationEngine:
         # 9. Determine Status
         if in_cone_of_silence:
             status = "CONE_OF_SILENCE"
+        elif below_min_elevation:
+            status = "BELOW_BEAM_MIN"
         elif exceeds_max_fl:
             status = "EXCEEDS_MAX_FL"
         elif exceeds_range:
@@ -237,6 +241,8 @@ class PropagationEngine:
             "has_los": bool(has_los),
             "has_fresnel_clearance": bool(has_fresnel),
             "in_cone_of_silence": bool(in_cone_of_silence),
+            "below_min_elevation": bool(below_min_elevation),
+            "elevation_min_deg": elevation_min_deg,
             "exceeds_max_flight_level": bool(exceeds_max_fl),
             "exceeds_operational_range": bool(exceeds_range),
             "status": status,

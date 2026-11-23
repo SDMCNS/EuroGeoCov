@@ -94,7 +94,12 @@ class AirspaceCoverageEngine:
 
             st_name = st.get("name", "Unknown Station")
             st_id = st.get("id", str(st_name))
-            cone_deg = float(st.get("elevation_max_deg") or st.get("cone_of_silence_deg") or (45.0 if st.get("category") == "RADAR" else 60.0))
+            st_cat = str(st.get("category", "")).upper()
+            st_type = str(st.get("type", "")).upper()
+            default_min_el = 30.0 if ("DME" in st_type and "VOR" not in st_type) else 0.5
+            default_max_el = 34.0 if st_cat == "RADAR" else 60.0
+            min_el_deg = float(st.get("elevation_min_deg") if st.get("elevation_min_deg") is not None else default_min_el)
+            cone_deg = float(st.get("elevation_max_deg") or st.get("cone_of_silence_deg") or default_max_el)
             max_range_km = float(st.get("range_km") or st.get("doc_range_km") or st.get("max_operational_range_km") or 400.0)
             st_freq = float(st.get("frequency_hz") or (float(st.get("frequency_khz")) * 1000.0 if st.get("frequency_khz") else frequency_hz))
 
@@ -109,6 +114,7 @@ class AirspaceCoverageEngine:
                 num_points=num_profile_points,
                 tx_is_agl=st_agl,
                 rx_is_agl=False,
+                elevation_min_deg=min_el_deg,
                 cone_of_silence_deg=cone_deg,
                 max_operational_range_km=max_range_km,
                 dem_reader=self.dem_reader
@@ -117,17 +123,20 @@ class AirspaceCoverageEngine:
             is_opt_los = los_eval["has_los"]
             is_fresnel = los_eval["has_fresnel_clearance"]
             in_cone = los_eval["in_cone_of_silence"]
+            below_beam = los_eval.get("below_min_elevation", False)
             exceeds_fl = los_eval["exceeds_max_flight_level"]
             exceeds_range = los_eval["exceeds_operational_range"]
             fspl = los_eval["total_path_loss_db"]
 
-            # Effective radio coverage requires Fresnel clearance, not being inside Cone of Silence,
-            # within useful flight level, and within designated operational range
-            is_usable_coverage = is_fresnel and not in_cone and not exceeds_fl and not exceeds_range
+            # Effective radio coverage requires Fresnel clearance, within elevation beam window,
+            # not inside Cone of Silence, within useful flight level, and within designated operational range
+            is_usable_coverage = is_fresnel and not in_cone and not below_beam and not exceeds_fl and not exceeds_range
 
             # Diagnostic classification
             if in_cone:
                 diag_status = "CONE_OF_SILENCE"
+            elif below_beam:
+                diag_status = "BELOW_BEAM_MIN"
             elif exceeds_range:
                 diag_status = "OUT_OF_RANGE"
             elif exceeds_fl:
@@ -156,6 +165,9 @@ class AirspaceCoverageEngine:
                 "distance_km": los_eval["total_distance_km"],
                 "elevation_angle_deg": los_eval["elevation_angle_deg"],
                 "in_cone_of_silence": in_cone,
+                "below_min_elevation": below_beam,
+                "elevation_min_deg": min_el_deg,
+                "elevation_max_deg": cone_deg,
                 "exceeds_max_fl": exceeds_fl,
                 "exceeds_range": exceeds_range,
                 "has_los": is_opt_los,
@@ -262,6 +274,9 @@ class AirspaceCoverageEngine:
                 "elevation_angle_deg": primary.get("elevation_angle_deg"),
                 "min_clearance_m": primary.get("min_clearance_m"),
                 "in_cone_of_silence": primary.get("in_cone_of_silence", False),
+                "below_min_elevation": primary.get("below_min_elevation", False),
+                "elevation_min_deg": primary.get("elevation_min_deg", 0.5),
+                "elevation_max_deg": primary.get("elevation_max_deg", 60.0),
                 "exceeds_range": primary.get("exceeds_range", False),
             })
             if coverage_floor_ft is None and res["is_covered"]:
@@ -568,8 +583,12 @@ class AirspaceCoverageEngine:
         target_amsl = flight_level_ft * FT_TO_METERS
 
         # Angular limits: Elevation & Azimuth
-        elev_min_deg = float(station.get("elevation_min_deg") or 0.5)
-        elev_max_deg = float(station.get("elevation_max_deg") or 60.0)
+        st_cat = str(station.get("category", "")).upper()
+        st_type = str(station.get("type", "")).upper()
+        default_min_el = 30.0 if ("DME" in st_type and "VOR" not in st_type) else 0.5
+        default_max_el = 34.0 if st_cat == "RADAR" else 60.0
+        elev_min_deg = float(station.get("elevation_min_deg") if station.get("elevation_min_deg") is not None else default_min_el)
+        elev_max_deg = float(station.get("elevation_max_deg") if station.get("elevation_max_deg") is not None else default_max_el)
         az_start = float(station.get("azimuth_start_deg") or 0.0)
         az_end = float(station.get("azimuth_end_deg") or 360.0)
 
@@ -581,6 +600,11 @@ class AirspaceCoverageEngine:
         else:
             r_cone_m = 0.0
         r_cone_km = round(r_cone_m / 1000.0, 2)
+
+        # Lower elevation cutoff outer limit (e.g. DME 30-degree window)
+        if delta_h > 0 and elev_min_deg > 0.5:
+            beam_outer_limit_m = delta_h / math.tan(math.radians(elev_min_deg))
+            r_max_m = min(r_max_m, beam_outer_limit_m)
 
         # Station center in EPSG:3035
         x0, y0 = wgs84_to_laea(lon, lat)

@@ -233,7 +233,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(res.headers["content-type"], "text/csv; charset=utf-8")
         text = res.text
         self.assertIn("ident,name,country,latitude,longitude,mast_height_m,range_nm", text)
-        self.assertIn("RAD_ALPS,Alps Surveillance Node,CH,46.5000,8.0000,30.0,220.0,0.0,360.0,0.5,45.0,MODE-S,true", text)
+        self.assertIn("RAD_ALPS,Alps Surveillance Node,CH,46.5000,8.0000,30.0,220.0,0.0,360.0,0.5,34.0,MODE-S,true", text)
 
     def test_14_template_export_navaids(self):
         payload = {
@@ -261,7 +261,7 @@ class TestAPI(unittest.TestCase):
         self.assertEqual(res.headers["content-type"], "text/csv; charset=utf-8")
         text = res.text
         self.assertIn("ident,name,country,latitude,longitude,type,service_category,power,elevation_ft", text)
-        self.assertIn("GVA,Geneve Cointrin,CH,46.2514,6.1081,VOR-DME,TMA,LOW,1410,115750,104X,40.0,60.0", text)
+        self.assertIn("GVA,Geneve Cointrin,CH,46.2514,6.1081,VOR-DME,TMA,LOW,1410,115750,104X,40.0,30.0,150.0", text)
 
 
 if __name__ == "__main__":

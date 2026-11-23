@@ -53,7 +53,12 @@ def evaluate_coverage_dynamically(
     tx_amsl = float(profile.get("tx_amsl_m") or 100.0)
     x0 = float(profile.get("x_laea") or 0.0)
     y0 = float(profile.get("y_laea") or 0.0)
-    elev_max_deg = float(profile.get("elevation_max_deg") or 60.0)
+    st_cat = str(profile.get("category", "")).upper()
+    st_type = str(profile.get("type", "")).upper()
+    default_min_el = 30.0 if ("DME" in st_type and "VOR" not in st_type) else 0.5
+    default_max_el = 34.0 if st_cat == "RADAR" else 60.0
+    elev_min_deg = float(profile.get("elevation_min_deg") if profile.get("elevation_min_deg") is not None else default_min_el)
+    elev_max_deg = float(profile.get("elevation_max_deg") if profile.get("elevation_max_deg") is not None else default_max_el)
     az_start = float(profile.get("azimuth_start_deg") or 0.0)
     az_end = float(profile.get("azimuth_end_deg") or 360.0)
 
@@ -68,9 +73,14 @@ def evaluate_coverage_dynamically(
 
     max_reach_limit = min(d_horiz_m, r_cap_m)
 
-    # Overhead Cone of Silence
+    # Lower elevation beam angle outer cutoff (e.g. DME 30-degree window)
     alt_diff = target_amsl - tx_amsl
-    if alt_diff > 0 and elev_max_deg < 90.0:
+    if alt_diff > 0 and elev_min_deg > 0.5:
+        beam_outer_limit_m = alt_diff / math.tan(math.radians(elev_min_deg))
+        max_reach_limit = min(max_reach_limit, beam_outer_limit_m)
+
+    # Overhead Cone of Silence inner cutoff (e.g. Radar 34-degree zenith cone)
+    if alt_diff > 0 and 0.0 < elev_max_deg < 90.0:
         cone_angle_rad = math.radians(elev_max_deg)
         r_cone_m = min(max_reach_limit, max(50.0, alt_diff / math.tan(cone_angle_rad)))
     else:
@@ -269,8 +279,12 @@ class CoveragePrecalculator:
         # Antenna limits
         az_start = float(station.get("azimuth_start_deg") or 0.0)
         az_end = float(station.get("azimuth_end_deg") or 360.0)
-        elev_min_deg = float(station.get("elevation_min_deg") or 0.5)
-        elev_max_deg = float(station.get("elevation_max_deg") or (45.0 if category == "RADAR" else 60.0))
+        st_cat = str(category or "").upper()
+        st_type = str(station.get("type", "")).upper()
+        default_min_el = 30.0 if ("DME" in st_type and "VOR" not in st_type) else 0.5
+        default_max_el = 34.0 if st_cat == "RADAR" else 60.0
+        elev_min_deg = float(station.get("elevation_min_deg") if station.get("elevation_min_deg") is not None else default_min_el)
+        elev_max_deg = float(station.get("elevation_max_deg") if station.get("elevation_max_deg") is not None else default_max_el)
 
         # 1. Generate radial sampling geometries out to the FL600 radio horizon (~600-650 km)
         azimuths = np.linspace(0.0, 360.0, num_radials, endpoint=False)

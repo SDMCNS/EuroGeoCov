@@ -212,6 +212,70 @@ class TestEuroGeoCov(unittest.TestCase):
         # Midpoint bulge is exactly 1/4 of total drop: 588.6 / 4 ≈ 147.15 m
         self.assertAlmostEqual(bulge_mid, drop_end / 4.0, delta=0.5)
 
+    def test_12_radar_cone_of_silence_34_degrees(self):
+        """Test Radar 34° zenith cone of silence behavior."""
+        # Point close to radar station overhead at high elevation angle (> 34.0°)
+        overhead = self.prop_engine.evaluate_los(
+            tx_lon=8.0,
+            tx_lat=46.0,
+            tx_alt_m=200.0,
+            rx_lon=8.001,
+            rx_lat=46.001,
+            rx_alt_m=4000.0,  # ~150 m ground distance, delta_h = 3800m -> elevation angle ~87°
+            cone_of_silence_deg=34.0,
+            dem_reader=self.dem_reader
+        )
+        self.assertTrue(overhead["in_cone_of_silence"])
+        self.assertFalse(overhead["has_los"])
+        self.assertEqual(overhead["status"], "CONE_OF_SILENCE")
+
+        # Point in operational beam (< 34.0° elevation)
+        in_beam = self.prop_engine.evaluate_los(
+            tx_lon=8.0,
+            tx_lat=46.0,
+            tx_alt_m=200.0,
+            rx_lon=8.2,
+            rx_lat=46.0,
+            rx_alt_m=4000.0,  # ~15.5 km ground distance, delta_h = 3800m -> elevation angle ~13.7°
+            cone_of_silence_deg=34.0,
+            dem_reader=self.dem_reader
+        )
+        self.assertFalse(in_beam["in_cone_of_silence"])
+        self.assertFalse(in_beam.get("below_min_elevation", False))
+
+    def test_13_dme_vertical_slice_30_150_window(self):
+        """Test DME 30°-150° (120° vertical slice) lower and upper beam boundaries."""
+        # Point with elevation angle below 30° window (e.g. distant low altitude)
+        below_window = self.prop_engine.evaluate_los(
+            tx_lon=8.0,
+            tx_lat=46.0,
+            tx_alt_m=200.0,
+            rx_lon=8.3,
+            rx_lat=46.0,
+            rx_alt_m=1000.0,  # ~23 km ground dist, delta_h = 800m -> elevation angle ~1.9° < 30°
+            elevation_min_deg=30.0,
+            cone_of_silence_deg=60.0,
+            dem_reader=self.dem_reader
+        )
+        self.assertTrue(below_window["below_min_elevation"])
+        self.assertFalse(below_window["has_los"])
+        self.assertEqual(below_window["status"], "BELOW_BEAM_MIN")
+
+        # Point within 30°-150° DME vertical window (elevation angle ~45°)
+        in_window = self.prop_engine.evaluate_los(
+            tx_lon=8.0,
+            tx_lat=46.0,
+            tx_alt_m=200.0,
+            rx_lon=8.035,
+            rx_lat=46.0,
+            rx_alt_m=3000.0,  # ~2.7 km ground dist, delta_h = 2800m -> elevation angle ~46°
+            elevation_min_deg=30.0,
+            cone_of_silence_deg=60.0,
+            dem_reader=self.dem_reader
+        )
+        self.assertFalse(in_window.get("below_min_elevation", False))
+        self.assertFalse(in_window["in_cone_of_silence"])
+
 
 if __name__ == "__main__":
     unittest.main()

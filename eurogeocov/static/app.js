@@ -1649,7 +1649,12 @@ function renderFlLadder(columnData, selectedFlFt) {
       statusClass = "fl-status-cone";
       statusLabel = "Cone Null";
       countBadge = `<span class="fl-station-count-badge count-zero">Cone of Silence</span>`;
-      pillsHtml = `<div style="font-size:9px; color:#d29922;">Above Antenna Max Elevation</div>`;
+      pillsHtml = `<div style="font-size:9px; color:#d29922;">Above Antenna Max Elevation (~34&deg; Radar)</div>`;
+    } else if (s.below_min_elevation) {
+      statusClass = "fl-status-cone";
+      statusLabel = "Below Beam";
+      countBadge = `<span class="fl-station-count-badge count-zero">Below Min Elev</span>`;
+      pillsHtml = `<div style="font-size:9px; color:#d29922;">Outside 30&deg;&ndash;150&deg; DME Window</div>`;
     } else {
       statusClass = "fl-status-shadow";
       statusLabel = "Blocked";
@@ -2015,6 +2020,17 @@ function onBuilderCategoryChange() {
 function onBuilderNavaidTypeChange() {
   const type = document.getElementById("builderNavaidType")?.value || "VOR-DME";
   const catSelect = document.getElementById("builderServiceCat");
+  const minEl = document.getElementById("builderNavaidMinElev");
+  const maxEl = document.getElementById("builderNavaidMaxElev");
+
+  if (type.includes("DME")) {
+    if (minEl) minEl.value = "30.0";
+    if (maxEl) maxEl.value = "150.0";
+  } else {
+    if (minEl) minEl.value = "0.5";
+    if (maxEl) maxEl.value = "60.0";
+  }
+
   if (type === "DME" || type.includes("TMA")) {
     if (catSelect) catSelect.value = "TMA";
     onBuilderServiceCatChange();
@@ -2084,7 +2100,7 @@ function addCustomSiteToBuilder() {
     const rng = parseFloat(document.getElementById("builderRadarRange")?.value) || 200.0;
     const modeS = document.getElementById("builderModeS")?.value === "true";
     const minEl = parseFloat(document.getElementById("builderRadarMinElev")?.value) || 0.5;
-    const maxEl = parseFloat(document.getElementById("builderRadarMaxElev")?.value) || 45.0;
+    const maxEl = parseFloat(document.getElementById("builderRadarMaxElev")?.value) || 34.0;
     const azS = parseFloat(document.getElementById("builderRadarAzStart")?.value) || 0.0;
     const azE = parseFloat(document.getElementById("builderRadarAzEnd")?.value) || 360.0;
 
@@ -2115,6 +2131,9 @@ function addCustomSiteToBuilder() {
     const elevFt = parseInt(document.getElementById("builderSiteElevFt")?.value) || 1000;
     const freqKhz = parseInt(document.getElementById("builderFreqKhz")?.value) || 115000;
     const dmeCh = (document.getElementById("builderDmeChan")?.value || "95X").trim().toUpperCase();
+    const isDme = nType.includes("DME");
+    const minEl = parseFloat(document.getElementById("builderNavaidMinElev")?.value) || (isDme ? 30.0 : 0.5);
+    const maxEl = parseFloat(document.getElementById("builderNavaidMaxElev")?.value) || (isDme ? 150.0 : 60.0);
 
     site = {
       id: `custom_nav_${ident}_${Date.now()}`,
@@ -2133,7 +2152,8 @@ function addCustomSiteToBuilder() {
       range_km: Math.round(rng * 1.852 * 10) / 10,
       frequency_khz: freqKhz,
       dme_channel: dmeCh,
-      elevation_max_deg: 60.0
+      elevation_min_deg: minEl,
+      elevation_max_deg: maxEl
     };
   }
 
@@ -2213,8 +2233,8 @@ function addFacilityToDatasetBuilder(stationId) {
     dme_channel: fac.dme_channel || "95X",
     azimuth_start_deg: fac.azimuth_limits ? fac.azimuth_limits[0] : 0.0,
     azimuth_end_deg: fac.azimuth_limits ? fac.azimuth_limits[1] : 360.0,
-    elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : 0.5,
-    elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 45.0 : 60.0)
+    elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : (isRadar ? 0.5 : ((fac.type && fac.type.includes("DME")) ? 30.0 : 0.5)),
+    elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 34.0 : ((fac.type && fac.type.includes("DME")) ? 150.0 : 60.0))
   };
 
   stagedDataset.push(site);
@@ -2263,8 +2283,8 @@ function importCheckedCoverageStationsToBuilder() {
       dme_channel: fac.dme_channel || "95X",
       azimuth_start_deg: fac.azimuth_limits ? fac.azimuth_limits[0] : 0.0,
       azimuth_end_deg: fac.azimuth_limits ? fac.azimuth_limits[1] : 360.0,
-      elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : 0.5,
-      elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 45.0 : 60.0)
+      elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : (isRadar ? 0.5 : ((fac.type && fac.type.includes("DME")) ? 30.0 : 0.5)),
+      elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 34.0 : ((fac.type && fac.type.includes("DME")) ? 150.0 : 60.0))
     };
     stagedDataset.push(site);
     addedCount++;
@@ -2454,7 +2474,7 @@ function generateRadarsCsv(radars) {
     const azS = Number(r.azimuth_start_deg !== undefined ? r.azimuth_start_deg : 0.0).toFixed(1);
     const azE = Number(r.azimuth_end_deg !== undefined ? r.azimuth_end_deg : 360.0).toFixed(1);
     const elMin = Number(r.elevation_min_deg !== undefined ? r.elevation_min_deg : 0.5).toFixed(1);
-    const elMax = Number(r.elevation_max_deg !== undefined ? r.elevation_max_deg : 45.0).toFixed(1);
+    const elMax = Number(r.elevation_max_deg !== undefined ? r.elevation_max_deg : 34.0).toFixed(1);
     const typ = (r.type || "MODE-S").trim().toUpperCase();
     const modeS = (r.mode_s === true || r.mode_s === "true" || r.mode_s === 1 || r.mode_s === "1") ? "true" : "false";
     lines.push(`${ident},${name},${country},${lat},${lon},${mastH},${rng},${azS},${azE},${elMin},${elMax},${typ},${modeS}`);
@@ -2464,7 +2484,7 @@ function generateRadarsCsv(radars) {
 
 function generateNavaidsCsv(navaids) {
   const lines = [
-    "ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_max_deg",
+    "ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_min_deg,elevation_max_deg",
     "# TEMPLATE GUIDE: Radio Navigation Aids (VOR, DME, VORTAC, TACAN)",
     "# Generated by EuroGeoCov Dataset Builder for CLI Ingestion via scripts/ingest_custom_data.py",
     "#"
@@ -2483,8 +2503,10 @@ function generateNavaidsCsv(navaids) {
     const freqKhz = Math.round(Number(n.frequency_khz || 115000));
     const dmeCh = (n.dme_channel || "95X").trim().toUpperCase();
     const rng = Number(n.range_nm || (serviceCat === "TMA" ? 40.0 : 130.0)).toFixed(1);
-    const elMax = Number(n.elevation_max_deg !== undefined ? n.elevation_max_deg : 60.0).toFixed(1);
-    lines.push(`${ident},${name},${country},${lat},${lon},${typ},${serviceCat},${power},${elevFt},${freqKhz},${dmeCh},${rng},${elMax}`);
+    const isDme = typ.includes("DME");
+    const elMin = Number(n.elevation_min_deg !== undefined ? n.elevation_min_deg : (isDme ? 30.0 : 0.5)).toFixed(1);
+    const elMax = Number(n.elevation_max_deg !== undefined ? n.elevation_max_deg : (isDme ? 150.0 : 60.0)).toFixed(1);
+    lines.push(`${ident},${name},${country},${lat},${lon},${typ},${serviceCat},${power},${elevFt},${freqKhz},${dmeCh},${rng},${elMin},${elMax}`);
   });
   return lines.join("\n") + "\n";
 }
