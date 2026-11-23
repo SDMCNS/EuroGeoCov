@@ -2707,6 +2707,7 @@ let three3DMode = "single"; // "single" or "multi"
 let threeIsRotating = false;
 let threeConeVisible = true;
 let threeRingsVisible = true;
+let threeOuterEdgesOnly = false;
 let threeTheme = "multi";
 let threeExaggeration = 6;
 let threeStationGroups = {};
@@ -2970,13 +2971,16 @@ function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, the
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    targetGroup.add(new THREE.Mesh(outerGeom, outerMat));
+    const outerMesh = new THREE.Mesh(outerGeom, outerMat);
+    outerMesh.userData.isSolid = true;
+    targetGroup.add(outerMesh);
   }
 
   const wireLines = new THREE.LineSegments(
     new THREE.WireframeGeometry(outerGeom),
     new THREE.LineBasicMaterial({ color: wireColor, transparent: true, opacity: isWireframeOnly ? 0.85 : 0.25 })
   );
+  wireLines.userData.isWireframe = true;
   targetGroup.add(wireLines);
 
   // --- B. Top Ceiling Cap Annulus ---
@@ -3013,9 +3017,13 @@ function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, the
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    targetGroup.add(new THREE.Mesh(topCapGeom, topCapMat));
+    const topCapMesh = new THREE.Mesh(topCapGeom, topCapMat);
+    topCapMesh.userData.isSolid = true;
+    targetGroup.add(topCapMesh);
   }
-  targetGroup.add(new THREE.LineSegments(new THREE.WireframeGeometry(topCapGeom), wireLines.material));
+  const topWire = new THREE.LineSegments(new THREE.WireframeGeometry(topCapGeom), wireLines.material);
+  topWire.userData.isWireframe = true;
+  targetGroup.add(topWire);
 
   // --- C. Floor Cap Annulus ---
   const floorCapGeom = new THREE.BufferGeometry();
@@ -3046,7 +3054,9 @@ function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, the
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    targetGroup.add(new THREE.Mesh(floorCapGeom, floorCapMat));
+    const floorCapMesh = new THREE.Mesh(floorCapGeom, floorCapMat);
+    floorCapMesh.userData.isSolid = true;
+    targetGroup.add(floorCapMesh);
   }
 
   // --- D. Inner Cone of Silence Funnel ---
@@ -3076,6 +3086,7 @@ function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, the
 
   const coneSubGroup = new THREE.Group();
   coneSubGroup.name = "coneSubGroup";
+  coneSubGroup.userData.isCone = true;
   const coneMat = new THREE.MeshPhongMaterial({
     color: coneColor,
     emissive: coneColor,
@@ -3092,6 +3103,64 @@ function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, the
   ));
   coneSubGroup.visible = threeConeVisible;
   targetGroup.add(coneSubGroup);
+
+  // --- E. Outer Perimeter Contour Rings & Boundary Ribs ---
+  const edgeGroup = new THREE.Group();
+  edgeGroup.name = "edgeGroup";
+  edgeGroup.userData.isOuterEdge = true;
+
+  const edgeMaterial = new THREE.LineBasicMaterial({
+    color: solidColor,
+    transparent: true,
+    opacity: 0.88
+  });
+
+  const ceilingEdgeMaterial = new THREE.LineBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 0.98
+  });
+
+  // Altitude horizontal perimeter loops (one closed contour per slice)
+  for (let s = 0; s < numSlices; s++) {
+    const ringPts = [];
+    for (let i = 0; i < numRadials; i++) {
+      ringPts.push(outerVerts[s][i]);
+    }
+    ringPts.push(outerVerts[s][0]); // close loop
+
+    const ringGeom = new THREE.BufferGeometry().setFromPoints(ringPts);
+    const ringLine = new THREE.Line(
+      ringGeom,
+      (s === numSlices - 1) ? ceilingEdgeMaterial : edgeMaterial
+    );
+    edgeGroup.add(ringLine);
+  }
+
+  // Vertical boundary corner ribs (evenly spaced around 360 deg)
+  const ribRadials = [];
+  const ribStep = Math.max(1, Math.floor(numRadials / 18));
+  for (let i = 0; i < numRadials; i += ribStep) {
+    ribRadials.push(i);
+  }
+
+  const ribGeom = new THREE.BufferGeometry();
+  const ribPositions = [];
+  ribRadials.forEach(i => {
+    for (let s = 0; s < numSlices - 1; s++) {
+      const p1 = outerVerts[s][i];
+      const p2 = outerVerts[s + 1][i];
+      ribPositions.push(p1.x, p1.y, p1.z, p2.x, p2.y, p2.z);
+    }
+  });
+  ribGeom.setAttribute("position", new THREE.Float32BufferAttribute(ribPositions, 3));
+  const ribLines = new THREE.LineSegments(
+    ribGeom,
+    new THREE.LineBasicMaterial({ color: solidColor, transparent: true, opacity: 0.72 })
+  );
+  edgeGroup.add(ribLines);
+
+  targetGroup.add(edgeGroup);
 }
 
 function buildStationAntennaMastInGroup(targetGroup, txAmsl, beaconColorHex) {
@@ -3164,6 +3233,7 @@ function buildThreeVolumeMesh(data) {
   const badgesBar = document.getElementById("modal3DStationBadges");
   if (badgesBar) badgesBar.style.display = "none";
 
+  applyOuterEdgesVisibility();
   updateModal3DStats(data, maxOuterReach);
 }
 
@@ -3274,6 +3344,7 @@ function buildThreeMultiSiteSculpture(data) {
     }
   });
 
+  applyOuterEdgesVisibility();
   updateModal3DMultiStats(data);
 }
 
@@ -3393,6 +3464,7 @@ async function openCoverage3DModal(stationId) {
 
   threeActiveStationId = stationId;
   three3DMode = "single";
+  threeOuterEdgesOnly = document.getElementById("modal3DOuterEdgesToggle")?.checked ?? false;
   const modal = document.getElementById("modalCoverage3D");
   if (!modal) return;
   modal.style.display = "flex";
@@ -3417,6 +3489,7 @@ async function openCoverage3DMultiSiteModal() {
   modal.style.display = "flex";
 
   three3DMode = "multi";
+  threeOuterEdgesOnly = document.getElementById("modal3DOuterEdgesToggle")?.checked ?? false;
   updateModeButtonsUI("multi");
   initThreeScene();
   setTimeout(() => onThreeResize(), 50);
@@ -3552,13 +3625,41 @@ function updateCoverage3DTheme() {
   }
 }
 
+function toggleCoverage3DOuterEdges() {
+  threeOuterEdgesOnly = document.getElementById("modal3DOuterEdgesToggle")?.checked ?? false;
+  applyOuterEdgesVisibility();
+}
+
+function applyOuterEdgesVisibility() {
+  threeVolumeGroup.traverse(child => {
+    if (child.userData?.isSolid) {
+      child.visible = !threeOuterEdgesOnly;
+    }
+    if (child.userData?.isWireframe) {
+      child.visible = !threeOuterEdgesOnly;
+    }
+    if (child.userData?.isCone || child.name === "coneSubGroup") {
+      child.visible = (!threeOuterEdgesOnly && threeConeVisible);
+    }
+    if (child.userData?.isOuterEdge || child.name === "edgeGroup") {
+      child.visible = true;
+    }
+  });
+
+  if (threeConeGroup) {
+    threeConeGroup.visible = (!threeOuterEdgesOnly && threeConeVisible);
+  }
+}
+
 function toggleCoverage3DCone() {
   threeConeVisible = document.getElementById("modal3DConeToggle")?.checked ?? true;
-  if (threeConeGroup) threeConeGroup.visible = threeConeVisible;
+  if (threeConeGroup) threeConeGroup.visible = (!threeOuterEdgesOnly && threeConeVisible);
 
   // Also toggle inner cone sub-groups across all stations in multi-site mode
   threeVolumeGroup.traverse(child => {
-    if (child.name === "coneSubGroup") child.visible = threeConeVisible;
+    if (child.userData?.isCone || child.name === "coneSubGroup") {
+      child.visible = (!threeOuterEdgesOnly && threeConeVisible);
+    }
   });
 }
 
