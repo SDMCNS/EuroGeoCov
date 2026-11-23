@@ -1843,67 +1843,116 @@ function stopRayRotation() {
   if (btn) btn.style.background = "";
 }
 
-let rayColumnCache = {};
+function synthesizeColumnFromProfile(profData, station, selectedFlFt) {
+  if (!profData || !profData.profile) return null;
+  const rxGroundM = (profData.rx && profData.rx.ground_elev_m !== undefined) ? profData.rx.ground_elev_m : 0;
+  const txAmslM = (profData.tx && profData.tx.amsl_m !== undefined) ? profData.tx.amsl_m : (station.tx_amsl_m || 25);
+  const distM = profData.total_distance_m || 1000;
+  const distKm = distM / 1000.0;
+  const cDistances = profData.profile.distances_m || [];
+  const cCurvedTerrain = profData.profile.curved_terrain_m || [];
+  const numPts = cDistances.length;
 
-async function updateRayAirspaceColumn(lat, lon, stationId, rayIndex) {
-  const sidePanel = document.getElementById("sideElevationPanel");
-  if (sidePanel) sidePanel.style.display = "flex";
+  const minElevDeg = (station.elevation_limits && station.elevation_limits[0] !== undefined)
+    ? station.elevation_limits[0]
+    : (station.elevation_min_deg !== undefined ? station.elevation_min_deg : 0.5);
+  const maxElevDeg = (station.elevation_limits && station.elevation_limits[1] !== undefined)
+    ? station.elevation_limits[1]
+    : (station.elevation_max_deg !== undefined ? station.elevation_max_deg : (station.category === "RADAR" ? 34.0 : 60.0));
+  const maxRangeKm = station.range_km || (station.range_nm ? station.range_nm * 1.852 : 370.4);
 
-  const colKey = `${stationId}_${rayIndex}`;
-  if (rayColumnCache[colKey]) {
-    const colData = rayColumnCache[colKey];
-    currentColumnData = colData;
-    const probeLoc = document.getElementById("sideProbeLocation");
-    if (probeLoc) {
-      probeLoc.innerHTML = `
-        <b>Ray Sweep:</b> ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E &middot; <b>Station:</b> ${stationId}<br>
-        <b>Terrain Elevation:</b> ${colData.ground_elevation_m}m (${Math.round(colData.ground_elevation_ft)} ft)<br>
-        <b>Coverage Floor:</b> <span style="color:var(--accent-cyan); font-weight:700;">${colData.coverage_floor_ft ? 'FL' + Math.round(colData.coverage_floor_ft / 100) + ' (' + colData.coverage_floor_ft.toLocaleString() + 'ft)' : 'No Coverage (Shadow)'}</span>
-      `;
-    }
-    const currentFlSelect = document.getElementById("conicalFlSelect");
-    const activeFl = currentFlSelect ? parseFloat(currentFlSelect.value) : 10000.0;
-    renderFlLadder(colData, activeFl);
-    return;
-  }
+  const rawIdent = station.station_ident || station.ident || "STA";
+  const ident = rawIdent.slice(0, 3).toUpperCase();
+  const name = station.station_name || station.name || ident;
 
-  try {
-    const payload = {
-      lat: lat,
-      lon: lon,
-      min_alt_ft: 1000.0,
-      max_alt_ft: 60000.0,
-      step_ft: 1000.0,
-      frequency_hz: getSelectedFrequencyHz(),
-      station_ids: [stationId]
-    };
-    const res = await fetch("/api/airspace/column", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!res.ok) return;
-    const colData = await res.json();
-    rayColumnCache[colKey] = colData;
+  const freqHz = getSelectedFrequencyHz();
+  const wavelength = 3e8 / freqHz;
 
-    // Render if still viewing or nearby
-    if (currentRayIndex === rayIndex || !rayRotationTimer) {
-      currentColumnData = colData;
-      const probeLoc = document.getElementById("sideProbeLocation");
-      if (probeLoc) {
-        probeLoc.innerHTML = `
-          <b>Ray Sweep:</b> ${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E &middot; <b>Station:</b> ${stationId}<br>
-          <b>Terrain Elevation:</b> ${colData.ground_elevation_m}m (${Math.round(colData.ground_elevation_ft)} ft)<br>
-          <b>Coverage Floor:</b> <span style="color:var(--accent-cyan); font-weight:700;">${colData.coverage_floor_ft ? 'FL' + Math.round(colData.coverage_floor_ft / 100) + ' (' + colData.coverage_floor_ft.toLocaleString() + 'ft)' : 'No Coverage (Shadow)'}</span>
-        `;
+  const samples = [];
+  let coverageFloorFt = null;
+
+  for (let altFt = 1000; altFt <= 60000; altFt += 1000) {
+    const altM = altFt * 0.3048;
+    const deltaH = altM - txAmslM;
+    const elevAngleDeg = (Math.atan2(deltaH, distM) * 180.0) / Math.PI;
+
+    const inCone = elevAngleDeg > maxElevDeg;
+    const belowMin = elevAngleDeg < minElevDeg;
+    const exceedsRange = distKm > maxRangeKm;
+
+    let isOptBlocked = false;
+    let isDiffracted = false;
+
+    if (altM <= rxGroundM) {
+      isOptBlocked = true;
+    } else if (!inCone && !belowMin && !exceedsRange && numPts > 0) {
+      for (let i = 0; i < numPts; i++) {
+        const s = cDistances[i];
+        if (s <= 0 || s >= distM) continue;
+        const rayH = txAmslM + (s / distM) * deltaH;
+        const curvedH = cCurvedTerrain[i];
+        const clearance = rayH - curvedH;
+
+        if (clearance < 0) {
+          isOptBlocked = true;
+          break;
+        }
+
+        const d1 = s;
+        const d2 = distM - s;
+        const f1 = Math.sqrt((wavelength * d1 * d2) / distM);
+        if (clearance < 0.6 * f1) {
+          isDiffracted = true;
+        }
       }
-      const currentFlSelect = document.getElementById("conicalFlSelect");
-      const activeFl = currentFlSelect ? parseFloat(currentFlSelect.value) : 10000.0;
-      renderFlLadder(colData, activeFl);
     }
-  } catch (err) {
-    console.warn("Ray column update error:", err);
+
+    const isCovered = (!isOptBlocked && !isDiffracted && !inCone && !belowMin && !exceedsRange);
+
+    if (isCovered && coverageFloorFt === null) {
+      coverageFloorFt = altFt;
+    }
+
+    let status = "CLEAR";
+    if (altM <= rxGroundM) status = "TERRAIN";
+    else if (inCone) status = "CONE_OF_SILENCE";
+    else if (belowMin) status = "BELOW_BEAM_MIN";
+    else if (exceedsRange) status = "OUT_OF_RANGE";
+    else if (isOptBlocked) status = "TERRAIN_BLOCKED";
+    else if (isDiffracted) status = "DIFFRACTED";
+
+    const fsplDb = isCovered ? Math.round(20 * Math.log10(distKm) + 20 * Math.log10(freqHz / 1e6) + 32.44) : null;
+
+    samples.push({
+      alt_ft: altFt,
+      is_covered: isCovered,
+      covering_count: isCovered ? 1 : 0,
+      covering_idents: isCovered ? [ident] : [],
+      covering_names: isCovered ? [`${ident} (${station.station_type || station.category || 'STA'})`] : [],
+      in_cone_of_silence: inCone,
+      below_min_elevation: belowMin,
+      distance_km: Math.round(distKm * 10) / 10,
+      elevation_angle_deg: Math.round(elevAngleDeg * 10) / 10,
+      path_loss_db: fsplDb,
+      status: status,
+      detailed_status: status,
+      station_breakdown: [{
+        ident: ident,
+        name: name,
+        is_covered: isCovered,
+        status: status,
+        distance_km: Math.round(distKm * 10) / 10,
+        path_loss_db: fsplDb
+      }]
+    });
   }
+
+  return {
+    ground_elevation_m: Math.round(rxGroundM * 10) / 10,
+    ground_elevation_ft: Math.round(rxGroundM * 3.28084),
+    coverage_floor_ft: coverageFloorFt,
+    column_samples: samples
+  };
 }
 
 async function inspectRayByIndex(rayIndex) {
@@ -1916,7 +1965,7 @@ async function inspectRayByIndex(rayIndex) {
 
   // Ensure side elevation panel is visible for vertical profile ladder
   const sidePanel = document.getElementById("sideElevationPanel");
-  if (sidePanel && sidePanel.style.display === "none") {
+  if (sidePanel && sidePanel.style.display !== "flex") {
     sidePanel.style.display = "flex";
     if (map) setTimeout(() => map.invalidateSize(), 50);
   }
@@ -1985,14 +2034,33 @@ async function inspectRayByIndex(rayIndex) {
     `, { permanent: false, sticky: true });
   }
 
-  // 3. Update Elevation & Fresnel Profile (bottom container)
+  // 3. Update Elevation & Fresnel Profile (bottom) AND Vertical Profile (side ladder) synchronously
   const flFt = lastCoverageData?.flight_level_ft || 10000.0;
   const cacheKey = `${station.station_id}_${flFt}_${rayIndex}`;
 
-  if (rayProfileCache[cacheKey]) {
-    currentProfileData = rayProfileCache[cacheKey];
-    updateProfileStatsCards(currentProfileData);
+  function applyProfileAndColumn(profData) {
+    currentProfileData = profData;
+    updateProfileStatsCards(profData);
     drawProfileChart();
+
+    // Update Vertical 1000-ft Column Ladder immediately!
+    const colData = synthesizeColumnFromProfile(profData, station, flFt);
+    if (colData) {
+      currentColumnData = colData;
+      const probeLoc = document.getElementById("sideProbeLocation");
+      if (probeLoc) {
+        probeLoc.innerHTML = `
+          <b>Ray Sweep:</b> ${r.azimuth_deg.toFixed(1)}° True &middot; <b>Station:</b> ${station.station_ident || "STA"}<br>
+          <b>Terrain Elevation:</b> ${colData.ground_elevation_m}m (${colData.ground_elevation_ft} ft)<br>
+          <b>Coverage Floor:</b> <span style="color:var(--accent-cyan); font-weight:700;">${colData.coverage_floor_ft ? 'FL' + Math.round(colData.coverage_floor_ft / 100) + ' (' + colData.coverage_floor_ft.toLocaleString() + 'ft)' : 'No Coverage (Shadow)'}</span>
+        `;
+      }
+      renderFlLadder(colData, flFt);
+    }
+  }
+
+  if (rayProfileCache[cacheKey]) {
+    applyProfileAndColumn(rayProfileCache[cacheKey]);
   } else {
     try {
       const payload = {
@@ -2015,20 +2083,11 @@ async function inspectRayByIndex(rayIndex) {
       if (res.ok) {
         const profData = await res.json();
         rayProfileCache[cacheKey] = profData;
-        if (currentRayIndex === rayIndex || !rayRotationTimer) {
-          currentProfileData = profData;
-          updateProfileStatsCards(profData);
-          drawProfileChart();
-        }
+        applyProfileAndColumn(profData);
       }
     } catch (e) {
       console.warn("Ray profile evaluate error:", e);
     }
-  }
-
-  // 4. Update Vertical 1000-ft Cubes in Side Elevation Panel at Ray Tip
-  if (coords && coords.length >= 2) {
-    updateRayAirspaceColumn(coords[1][0], coords[1][1], station.station_id, rayIndex);
   }
 }
 
