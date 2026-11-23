@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EuroGeoCov | European Geodatabase, DEM & Airspace Coverage</title>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Turf.js for fast client-side coverage polygon union & geometric analysis -->
+  <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css?v=1.4">
+</head>
+
+<body>
+
+  <header>
+    <div class="logo-area">
+      <h2 style="font-size: 16px; font-weight: 700; color: #fff;">🛰️ EuroGeoCov</h2>
+      <span class="badge">EU-DEM 25m &middot; EPSG:3035</span>
+      <span class="badge" style="border-color: rgba(63,185,80,0.4); color: var(--accent-green);"
+        id="statusIndicator">Ready</span>
+    </div>
+
+    <div class="nav-tabs">
+      <button class="tab-btn active" onclick="switchTab('conical')">Radars &amp; Navaids Coverage</button>
+      <button class="tab-btn" onclick="switchTab('los')">LoS &amp; Fresnel</button>
+      <button class="tab-btn" onclick="switchTab('airspace')">Airspace 1000ft Cubes</button>
+      <button class="tab-btn" onclick="switchTab('peaks')">Peaks Geodatabase</button>
+      <button class="tab-btn" onclick="switchTab('explainer')">📖 Explainer &amp; Formulas</button>
+      <button class="tab-btn" onclick="switchTab('dependencies')">Prototype Dependencies</button>
+    </div>
+  </header>
+
+  <div class="main-container">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+
+      <!-- Tab 1: Point to Point LoS -->
+      <div id="tab-los" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title">
+            <span>Transmitter (Tx) / Mountain Site</span>
+            <button class="btn-secondary" style="padding: 2px 8px; font-size: 11px; width: auto;"
+              onclick="pickOnMap('tx')">Click on Map</button>
+          </div>
+          <div class="form-group">
+            <label>Select European Peak Transmitter</label>
+            <select id="txPeakSelect" onchange="onTxPeakSelect(this.value)">
+              <option value="">-- Choose Mountain Peak --</option>
+            </select>
+          </div>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Latitude (&deg;N)</label>
+              <input type="number" step="0.0001" id="txLat" value="45.8326">
+            </div>
+            <div class="form-group">
+              <label>Longitude (&deg;E)</label>
+              <input type="number" step="0.0001" id="txLon" value="6.8652">
+            </div>
+          </div>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Antenna Height (m)</label>
+              <input type="number" id="txAlt" value="25">
+            </div>
+            <div class="form-group">
+              <label>Altitude Reference</label>
+              <select id="txAltType">
+                <option value="AGL" selected>AGL (Mast height)</option>
+                <option value="AMSL">AMSL (Sea Level)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-title">
+            <span>Receiver (Rx) / Airspace Target</span>
+            <button class="btn-secondary" style="padding: 2px 8px; font-size: 11px; width: auto;"
+              onclick="pickOnMap('rx')">Click on Map</button>
+          </div>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Latitude (&deg;N)</label>
+              <input type="number" step="0.0001" id="rxLat" value="45.9384">
+            </div>
+            <div class="form-group">
+              <label>Longitude (&deg;E)</label>
+              <input type="number" step="0.0001" id="rxLon" value="7.7285">
+            </div>
+          </div>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Altitude (ft AMSL)</label>
+              <input type="number" id="rxAltFt" value="12000" onchange="syncRxAltMeters()">
+            </div>
+            <div class="form-group">
+              <label>Altitude (m AMSL)</label>
+              <input type="number" id="rxAltM" value="3657.6" onchange="syncRxAltFeet()">
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section">
+          <div class="section-title">RF Propagation Parameters</div>
+          <div class="form-group">
+            <label>Radio Frequency</label>
+            <select id="freqPreset" onchange="onFreqPresetChange(this.value)">
+              <option value="1090000000" selected>1090 MHz (ADS-B / Mode-S Transponder)</option>
+              <option value="121500000">121.5 MHz (VHF Airband Voice / Guard)</option>
+              <option value="114000000">114.0 MHz (VHF VOR Navigation)</option>
+              <option value="1025000000">1025 MHz (DME / TACAN)</option>
+              <option value="5800000000">5.8 GHz (Microwave Ground-Air Link)</option>
+              <option value="custom">Custom Frequency</option>
+            </select>
+          </div>
+          <div class="form-group" id="customFreqGroup" style="display: none;">
+            <label>Custom Frequency (Hz)</label>
+            <input type="number" id="customFreqHz" value="1090000000">
+          </div>
+          <div class="form-group">
+            <label>Atmospheric Refraction (k-factor)</label>
+            <select id="kFactor">
+              <option value="1.3333" selected>k = 4/3 (~1.33 Standard Radio Refraction)</option>
+              <option value="1.0">k = 1.0 (True Geometric / Optical Line of Sight)</option>
+              <option value="1.6">k = 1.6 (Sub-refractive / Ducting)</option>
+            </select>
+          </div>
+          <button class="btn" onclick="runLoSEvaluation()">⚡ Calculate Line of Sight &amp; Fresnel</button>
+        </div>
+      </div>
+
+      <!-- Tab: Conical Coverage & Side FL Elevation View (Radars & Navaids) -->
+      <div id="tab-conical" class="tab-content">
+        <div class="panel-section">
+          <div class="section-title">
+            <span>ECAC Surveillance &amp; Navaids Coverage</span>
+            <span class="badge" id="facilitiesCountBadge" style="font-size:10px;">816 Navs / 185 Radars</span>
+          </div>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 10px;">
+            Select 1 or more Radars, Enroute VOR/DMEs, or Airport TMA DMEs to see conical slice coverage as a radial of
+            lines with cut LoS points forming a jagged, broken-edged circle.
+          </p>
+
+          <!-- Facility Category Filters -->
+          <div class="facility-filter-chips">
+            <button class="filter-chip active" data-cat="ALL" onclick="setFacilityFilter('ALL')">All (1,929)</button>
+            <button class="filter-chip" data-cat="RADAR" onclick="setFacilityFilter('RADAR')">Radars (185)</button>
+            <button class="filter-chip" data-cat="ENROUTE" onclick="setFacilityFilter('ENROUTE')">Enroute VOR/DME
+              (130NM)</button>
+            <button class="filter-chip" data-cat="TMA" onclick="setFacilityFilter('TMA')">TMA DME (25NM)</button>
+            <button class="filter-chip" data-cat="PEAK" onclick="setFacilityFilter('PEAK')">Peaks (928)</button>
+          </div>
+
+          <!-- Country Filter & Bulk Selection Dropdown -->
+          <div class="form-group" style="margin-top: 8px;">
+            <label
+              style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">
+              <span>Country Filter &amp; Bulk Select</span>
+              <span id="countryStatsBadge" style="color: var(--accent-cyan); font-weight: 600;">40 ECAC Countries</span>
+            </label>
+            <select id="facilityCountrySelect" onchange="onFacilityCountryChange(this.value)">
+              <option value="">All ECAC Countries (1,001 facilities)</option>
+            </select>
+          </div>
+
+          <!-- Country Bulk Actions Bar -->
+          <div id="countryBulkActions" class="country-bulk-card">
+            <div class="country-bulk-header">
+              <span style="font-weight: 600; color: #fff;">Bulk Select in <span id="targetCountryName"
+                  style="color: var(--accent-cyan);">All ECAC Countries</span>:</span>
+              <span id="targetCountryTotals" style="color: var(--text-muted); font-size: 10px;">816 Navs &middot; 185
+                Radars</span>
+            </div>
+            <div class="btn-bulk-group">
+              <button type="button" class="btn-bulk" onclick="bulkSelectByCountry('VOR_DME')"
+                title="Select all VOR and DME navigation aids in this country">
+                <span>📡 All VOR/DME</span>
+                <span id="countryVorCount" class="badge"
+                  style="background:rgba(88,166,255,0.25); color:var(--accent-blue); font-size:10px; padding:0 4px;">816</span>
+              </button>
+              <button type="button" class="btn-bulk" onclick="bulkSelectByCountry('RADAR')"
+                title="Select all surveillance and ATC radars in this country">
+                <span>🎯 All Radars</span>
+                <span id="countryRadarCount" class="badge"
+                  style="background:rgba(210,153,34,0.25); color:var(--accent-yellow); font-size:10px; padding:0 4px;">185</span>
+              </button>
+              <button type="button" class="btn-bulk" onclick="bulkSelectByCountry('ALL')"
+                title="Select all facilities (VOR, DME, Radars) in this country">
+                <span>🌐 All Facilities</span>
+                <span id="countryTotalCount" class="badge"
+                  style="background:rgba(63,185,80,0.25); color:var(--accent-green); font-size:10px; padding:0 4px;">1,001</span>
+              </button>
+              <button type="button" class="btn-bulk btn-bulk-clear" onclick="bulkDeselectByCountry()"
+                title="Deselect facilities in this country">
+                <span>✕ Deselect</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Search & Multi-select Toolbar -->
+          <div class="form-group" style="margin-top: 8px;">
+            <input type="text" id="facilitySearchInput" placeholder="Filter facilities by ident, name, or country..."
+              oninput="onFacilitySearchInput()">
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 11px; color: var(--text-muted);" id="visibleFacilityCountText">Showing
+              facilities</span>
+            <div style="display: flex; gap: 6px;">
+              <button class="btn-link" onclick="selectAllFilteredFacilities()">Select All</button>
+              <span style="color: var(--border-color);">|</span>
+              <button class="btn-link" onclick="clearSelectedFacilities()">Clear</button>
+            </div>
+          </div>
+
+          <!-- Facility Scrollable Selection Box -->
+          <div class="facility-select-container" id="facilitySelectContainer">
+            <div style="color: var(--text-muted); font-size: 11px; text-align: center; padding: 10px;">Loading
+              facilities...</div>
+          </div>
+
+          <!-- Selected Facilities Badges -->
+          <div class="selected-facilities-header" style="margin-top: 10px;">
+            <span style="font-size: 11px; font-weight: 600; color: #fff;">Selected Facilities for Multi-Station
+              LoS:</span>
+            <span id="selectedCountBadge" class="badge" style="font-size: 10px; padding: 1px 6px;">0 Selected</span>
+          </div>
+          <div class="selected-chips-box" id="selectedChipsBox">
+            <span style="font-size: 11px; color: var(--text-muted); font-style: italic;">No facility selected yet. Check
+              boxes above or click presets.</span>
+          </div>
+
+          <!-- Quick Presets -->
+          <div class="presets-row" style="margin-top: 8px;">
+            <span style="font-size: 11px; color: var(--text-muted);">Quick Sets:</span>
+            <button class="btn-chip" onclick="loadPresetFacilities('major_radars')">Major Radars</button>
+            <button class="btn-chip" onclick="loadPresetFacilities('enroute_dme')">Alps VOR/DME</button>
+            <button class="btn-chip" onclick="loadPresetFacilities('tma_london_paris')">London/Paris TMA</button>
+          </div>
+
+          <!-- Flight Level Dropdown (FL10 / 1000 ft steps) -->
+          <div class="form-group" style="margin-top: 12px;">
+            <label>Flight Level (FL10 / 1,000 ft increments)</label>
+            <select id="conicalFlSelect" onchange="runMultiStationCoverage()">
+              <option value="1000">FL010 (1,000 ft AMSL)</option>
+              <option value="2000">FL020 (2,000 ft AMSL)</option>
+              <option value="3000">FL030 (3,000 ft AMSL)</option>
+              <option value="4000">FL040 (4,000 ft AMSL)</option>
+              <option value="5000">FL050 (5,000 ft AMSL)</option>
+              <option value="7000">FL070 (7,000 ft AMSL)</option>
+              <option value="10000" selected>FL100 (10,000 ft AMSL)</option>
+              <option value="12000">FL120 (12,000 ft AMSL)</option>
+              <option value="15000">FL150 (15,000 ft AMSL)</option>
+              <option value="18000">FL180 (18,000 ft AMSL)</option>
+              <option value="20000">FL200 (20,000 ft AMSL)</option>
+              <option value="24000">FL240 (24,000 ft AMSL)</option>
+              <option value="30000">FL300 (30,000 ft AMSL)</option>
+              <option value="35000">FL350 (35,000 ft Cruising Altitude)</option>
+              <option value="40000">FL400 (40,000 ft AMSL)</option>
+              <option value="45000">FL450 (45,000 ft High Altitude)</option>
+              <option value="50000">FL500 (50,000 ft AMSL)</option>
+              <option value="60000">FL600 (60,000 ft Service Ceiling)</option>
+            </select>
+          </div>
+
+          <!-- Operational Range & FL600 Over-the-Horizon View Controls -->
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label style="margin-bottom:0;">View Range Limit</label>
+              <span id="rangeModeLabel"
+                style="font-size:11px; color:var(--accent-cyan); font-weight:600;">Over-the-Horizon (FL600)</span>
+            </div>
+            <div style="display:flex; gap:10px; margin-bottom:6px; flex-wrap:wrap;">
+              <label style="font-size:11px; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="radio" name="rangeMode" id="rangeModeHorizon" value="horizon" checked
+                  onchange="onRangeModeChange()"> Over-the-Horizon (Full FL600)
+              </label>
+              <label style="font-size:11px; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="radio" name="rangeMode" id="rangeModeDoc" value="doc" onchange="onRangeModeChange()">
+                Designated (DOC)
+              </label>
+              <label style="font-size:11px; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                <input type="radio" name="rangeMode" id="rangeModeCustom" value="custom" onchange="onRangeModeChange()">
+                Custom Max Range
+              </label>
+            </div>
+            <div id="rangeCustomGroup"
+              style="display:none; margin-top:6px; background:rgba(22,27,34,0.6); padding:8px; border-radius:6px; border:1px solid var(--border-color);">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <span style="font-size:11px; color:var(--text-muted);">Max Range Slider:</span>
+                <span id="rangeValueDisplay" style="font-size:11px; color:var(--accent-cyan); font-weight:700;">200 km
+                  (108 NM)</span>
+              </div>
+              <input type="range" id="conicalRangeSlider" min="20" max="700" value="200" step="10"
+                oninput="onRangeSliderChange(this.value)">
+            </div>
+          </div>
+
+          <!-- Radial Ray Density -->
+          <div class="row-2">
+            <div class="form-group">
+              <label>Ray Density (Azimuths)</label>
+              <select id="conicalNumRadials" onchange="runMultiStationCoverage()">
+                <option value="36">36 rays (10&deg; steps - Fast)</option>
+                <option value="72" selected>72 rays (5&deg; steps - Balanced)</option>
+                <option value="120">120 rays (3&deg; steps - High Res)</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Angular Sector Limits</label>
+              <div style="font-size: 11px; color: var(--accent-green); padding-top: 6px;">
+                ✓ Auto (Azimuth &amp; Elev Limits)
+              </div>
+            </div>
+          </div>
+
+          <!-- Coverage Display & Merging Controls -->
+          <div class="form-group"
+            style="background: rgba(22, 27, 34, 0.7); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border-color); margin-top: 8px;">
+            <div
+              style="font-size: 11px; font-weight: 600; color: #fff; margin-bottom: 6px; display:flex; justify-content:space-between; align-items:center;">
+              <span>Coverage Display Modes:</span>
+              <span class="badge" style="font-size:9px; background:rgba(88,166,255,0.2); color:var(--accent-blue);">⚡
+                Instant Precalculated</span>
+            </div>
+            <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="toggleShowRadials" checked onchange="refreshConicalRender()">
+                <span>Radial Cut Spoke Lines</span>
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="toggleMergeCoverage" checked onchange="refreshConicalRender()">
+                <span style="color: var(--accent-cyan); font-weight: 600;">Merged Coverage Area</span>
+              </label>
+              <label style="font-size: 11px; display: flex; align-items: center; gap: 5px; cursor: pointer;">
+                <input type="checkbox" id="toggleShowPerimeters" checked onchange="refreshConicalRender()">
+                <span>Station Perimeters</span>
+              </label>
+            </div>
+          </div>
+
+          <button class="btn" onclick="runMultiStationCoverage()">⚡ Load &amp; Merge Precalculated Coverage</button>
+          <button class="btn btn-secondary" style="margin-top:8px;" onclick="enableMapProbe()">📍 Click Map Point to Inspect Multi-Station 1000ft Airspace Column</button>
+
+          <!-- Ray Elevation & Fresnel Profile Sweep & Inspection -->
+          <div class="panel-section" id="rayInspectionSection" style="margin-top: 14px; background: rgba(22, 27, 34, 0.7); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
+            <div class="section-title" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <span style="font-weight: 700; color: #fff;">📡 Ray Profile Sweep &amp; Rotation</span>
+              <span id="rayAzimuthBadge" class="badge" style="background: rgba(56, 139, 253, 0.2); color: var(--accent-cyan); font-size: 11px;">Az: 0.0&deg;</span>
+            </div>
+            <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px;">
+              Select one of the active stations below to inspect individual radial rays (72 or 120). Drag the slider or press Play to rotate 360&deg; around the site, highlighting the ray on the map, plotting the terrain cross-section below, and showing 1000-ft vertical cubes at the side.
+            </p>
+
+            <!-- Active Station Selector -->
+            <div class="form-group">
+              <label style="font-size: 11px; color: var(--text-muted);">Active Station for Ray Profile</label>
+              <select id="rayStationSelect" onchange="onRayStationSelect(this.value)">
+                <option value="">-- Select an active station --</option>
+              </select>
+            </div>
+
+            <!-- Ray Azimuth Slider -->
+            <div class="form-group" style="margin-top: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-size: 11px; color: var(--text-muted);">Ray Azimuth Angle:</span>
+                <span id="rayAngleDisplay" style="font-size: 11px; font-weight: 700; color: var(--accent-cyan);">0.0&deg; (Ray 1 / 72)</span>
+              </div>
+              <input type="range" id="rayAzimuthSlider" min="0" max="71" value="0" step="1" oninput="onRaySliderInput(this.value)">
+            </div>
+
+            <!-- Play / Rotation Controls -->
+            <div style="display: flex; gap: 8px; margin-top: 10px; align-items: center;">
+              <button type="button" class="btn" id="btnPlayRays" onclick="toggleRayRotation()" style="flex: 1; padding: 6px 12px; font-size: 12px;">
+                <span id="playIcon">▶</span> <span id="playText">Play Rotation Sweep</span>
+              </button>
+              <button type="button" class="btn-secondary" onclick="stepRay(-1)" title="Previous Ray" style="padding: 6px 10px; font-size: 12px;">◀</button>
+              <button type="button" class="btn-secondary" onclick="stepRay(1)" title="Next Ray" style="padding: 6px 10px; font-size: 12px;">▶</button>
+              <select id="rayRotationSpeed" style="width: 110px; font-size: 11px; padding: 6px 4px;">
+                <option value="350">Normal (350ms)</option>
+                <option value="180">Fast (180ms)</option>
+                <option value="600">Slow (600ms)</option>
+              </select>
+            </div>
+
+            <!-- Active Ray Diagnostic Summary -->
+            <div id="activeRaySummary" style="margin-top: 10px; padding: 8px; background: rgba(13, 17, 23, 0.6); border-radius: 4px; border: 1px solid var(--border-color); font-size: 11px; line-height: 1.6;">
+              <div style="color: var(--text-muted); text-align: center;">Load precalculated coverage above to inspect rays.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section" id="conicalStatsSection">
+          <div class="section-title">Multi-Station Coverage Metrics</div>
+          <div id="multiStationStatsContent" style="font-size:12px; line-height:1.7;">
+            <div>Select facilities above and click calculate.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Airspace 1000ft Cubes -->
+      <div id="tab-airspace" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title">1000-ft Airspace Voxel Analysis</div>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+            Assess radio coverage at any 1000-ft cube in Earth's airspace from European mountain transmitter networks.
+          </p>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Target Lat (&deg;N)</label>
+              <input type="number" step="0.0001" id="cubeLat" value="46.0">
+            </div>
+            <div class="form-group">
+              <label>Target Lon (&deg;E)</label>
+              <input type="number" step="0.0001" id="cubeLon" value="7.5">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Cube Altitude (Flight Level / ft)</label>
+            <select id="cubeAltSelect">
+              <option value="1000">FL010 (1,000 ft AMSL)</option>
+              <option value="3000">FL030 (3,000 ft AMSL)</option>
+              <option value="5000">FL050 (5,000 ft AMSL)</option>
+              <option value="10000" selected>FL100 (10,000 ft AMSL)</option>
+              <option value="18000">FL180 (18,000 ft AMSL)</option>
+              <option value="24000">FL240 (24,000 ft AMSL)</option>
+              <option value="35000">FL350 (35,000 ft Cruising Altitude)</option>
+              <option value="45000">FL450 (45,000 ft High Altitude)</option>
+            </select>
+          </div>
+          <button class="btn" onclick="evaluateAirspaceCube()">🔍 Evaluate 1000-ft Cube</button>
+          <button class="btn btn-secondary" style="margin-top: 8px;" onclick="evaluateVerticalColumn()">📊 Scan Vertical
+            Column (1k-45k ft)</button>
+        </div>
+
+        <div class="panel-section" id="airspaceCubeResult" style="display: none;">
+          <div class="section-title">Cube Assessment Result</div>
+          <div id="cubeResultContent" style="font-size: 13px; line-height: 1.6;"></div>
+        </div>
+
+        <div class="panel-section" id="airspaceColumnResult" style="display: none;">
+          <div class="section-title">Vertical Column Profile</div>
+          <div id="columnResultContent" style="max-height: 250px; overflow-y: auto; font-size: 12px;"></div>
+        </div>
+      </div>
+
+      <!-- Tab 3: Peaks Geodatabase -->
+      <div id="tab-peaks" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title">European Peaks Database</div>
+          <div class="form-group">
+            <input type="text" id="peakSearchQuery" placeholder="Search by name (e.g. Mont Blanc, Olympus)..."
+              oninput="debounceSearchPeaks()">
+          </div>
+          <div class="row-2">
+            <div class="form-group">
+              <label>Country</label>
+              <select id="peakCountrySelect" onchange="searchPeaks()">
+                <option value="">All Countries</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Min Height (m)</label>
+              <input type="number" id="peakMinMeters" value="1500" onchange="searchPeaks()">
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-section" style="padding: 0;">
+          <div class="peaks-table-container">
+            <table id="peaksTable">
+              <thead>
+                <tr>
+                  <th>Peak Name</th>
+                  <th>Country</th>
+                  <th>Reported</th>
+                  <th>EU-DEM</th>
+                </tr>
+              </thead>
+              <tbody id="peaksTableBody">
+                <tr>
+                  <td colspan="4" style="text-align: center; color: var(--text-muted);">Loading European peaks...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: Explainer & Formulas -->
+      <div id="tab-explainer" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title">
+            <span>📖 Scientific Concepts &amp; Formulas</span>
+            <span class="badge" style="background: rgba(56,139,253,0.2); color: var(--accent-cyan); font-size: 10px;">RF Propagation</span>
+          </div>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+            EuroGeoCov evaluates European airspace line of sight (LoS), radar coverage, and radio navigation aid performance using the 25m EU-DEM dataset combined with rigorous electromagnetic wave propagation models.
+          </p>
+
+          <!-- 1. Earth Curvature & k-factor -->
+          <div class="explainer-card">
+            <div class="explainer-header">
+              <span class="explainer-num">1</span>
+              <div>
+                <div class="explainer-title">Earth Curvature &amp; 4/3 Refraction (k = 4/3)</div>
+                <div class="explainer-subtitle">Tropospheric bending of radio waves</div>
+              </div>
+            </div>
+            <p class="explainer-body">
+              Due to atmospheric density decreasing with altitude, radio waves refract (bend) downward toward the Earth. Under standard international atmosphere (ICAO Annex 10 / ITU-R P.834), this is modeled by scaling Earth's physical radius ($R_0 \approx 6,371\text{ km}$) by an effective factor $k = 4/3 \approx 1.3333$:
+            </p>
+            <div class="explainer-formula">
+              R' = k &times; R<sub>0</sub> &approx; 8,495 km
+            </div>
+            <p class="explainer-body">
+              The apparent terrain bulge (elevation drop) &Delta;h at distance d<sub>1</sub> from transmitter and d<sub>2</sub> from receiver is calculated as:
+            </p>
+            <div class="explainer-formula">
+              &Delta;h(d) = (d<sub>1</sub> &times; d<sub>2</sub>) / (2 &times; R') &approx; (d<sub>1</sub> &times; d<sub>2</sub>) / 16,990 km
+            </div>
+            <p class="explainer-body">
+              The maximum theoretical radio horizon line-of-sight distance over smooth Earth is:
+            </p>
+            <div class="explainer-formula">
+              d<sub>horizon</sub> &approx; 4.12 &times; (&radic;h<sub>tx</sub> + &radic;h<sub>rx</sub>) km &nbsp; (h in meters)<br>
+              d<sub>horizon</sub> &approx; 1.23 &times; (&radic;h<sub>tx</sub> + &radic;h<sub>rx</sub>) NM &nbsp; (h in feet)
+            </div>
+          </div>
+
+          <!-- 2. Fresnel Zone -->
+          <div class="explainer-card">
+            <div class="explainer-header">
+              <span class="explainer-num">2</span>
+              <div>
+                <div class="explainer-title">First Fresnel Zone (F₁) &amp; 60% Clearance</div>
+                <div class="explainer-subtitle">Diffraction and multi-path clearance ellipsoid</div>
+              </div>
+            </div>
+            <p class="explainer-body">
+              Radio waves do not travel as a microscopic optical line, but rather in concentric ellipsoidal Fresnel zones where secondary wavelets interfere constructively. The radius of the 1st Fresnel zone at intermediate distances d<sub>1</sub>, d<sub>2</sub> is:
+            </p>
+            <div class="explainer-formula">
+              F<sub>1</sub> = &radic;[ (&lambda; &times; d<sub>1</sub> &times; d<sub>2</sub>) / (d<sub>1</sub> + d<sub>2</sub>) ] = &radic;[ (c &times; d<sub>1</sub> &times; d<sub>2</sub>) / (f &times; (d<sub>1</sub> + d<sub>2</sub>)) ]
+            </div>
+            <div class="explainer-body">
+              <b>Clearance Threshold:</b> If surrounding mountain terrain penetrates inside <b>60% of the 1st Fresnel zone</b> (0.6 &times; F<sub>1</sub>), diffraction loss and phase cancellation begin.
+              <ul style="margin: 6px 0 0 16px; padding: 0;">
+                <li><span style="color: var(--accent-green); font-weight:600;">Clear LoS:</span> Clearance &ge; 0.6 F<sub>1</sub> (free space propagation).</li>
+                <li><span style="color: var(--accent-yellow); font-weight:600;">Diffracted:</span> Clearance between 0.0 and 0.6 F<sub>1</sub> (1 to 6 dB shadow loss).</li>
+                <li><span style="color: var(--accent-red); font-weight:600;">Terrain Blocked:</span> Clearance &lt; 0.0 m (optical ray obstructed by peak).</li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- 3. Cone of Silence -->
+          <div class="explainer-card">
+            <div class="explainer-header">
+              <span class="explainer-num">3</span>
+              <div>
+                <div class="explainer-title">Radar &amp; Navaid Cone of Silence</div>
+                <div class="explainer-subtitle">Antenna vertical aperture null directly overhead</div>
+              </div>
+            </div>
+            <p class="explainer-body">
+              Ground-based radar dishes (PSR, SSR, Mode-S) and VOR/DME ground stations have limited vertical beam elevation apertures. Surveillance radars typically scan up to &theta;<sub>max</sub> = 40&deg;&ndash;45&deg;, while TACAN/DMEs transmit up to &theta;<sub>max</sub> = 60&deg;.
+            </p>
+            <div class="explainer-formula">
+              &theta; = arctan[ (h<sub>aircraft</sub> &minus; h<sub>station</sub>) / d<sub>ground</sub> ] &minus; (d<sub>ground</sub> / (2 R'))
+            </div>
+            <p class="explainer-body">
+              When the elevation angle exceeds &theta;<sub>max</sub> (&theta; &gt; &theta;<sub>max</sub>), the target enters the <b>Cone of Silence</b> blind zone directly above the facility antenna. The dead cone radius at altitude h is:
+            </p>
+            <div class="explainer-formula">
+              r<sub>cone</sub> = (h &minus; h<sub>station</sub>) / tan(&theta;<sub>max</sub>)
+            </div>
+          </div>
+
+          <!-- 4. Path Loss & Knife Edge -->
+          <div class="explainer-card">
+            <div class="explainer-header">
+              <span class="explainer-num">4</span>
+              <div>
+                <div class="explainer-title">Free Space Path Loss (FSPL) &amp; Diffraction</div>
+                <div class="explainer-subtitle">Friis formula &amp; ITU-R P.526 knife-edge attenuation</div>
+              </div>
+            </div>
+            <p class="explainer-body">
+              Free space attenuation for radio signals across slant distance d and frequency f is computed via Friis transmission equation:
+            </p>
+            <div class="explainer-formula">
+              FSPL (dB) = 32.44 + 20 log<sub>10</sub>(d<sub>km</sub>) + 20 log<sub>10</sub>(f<sub>MHz</sub>)
+            </div>
+            <p class="explainer-body">
+              When terrain penetrates the LoS ray, ITU-R P.526 knife-edge diffraction loss J(v) is calculated using the dimensionless Fresnel-Kirchhoff parameter v:
+            </p>
+            <div class="explainer-formula">
+              v = h<sub>obst</sub> &times; &radic;[ 2(d<sub>1</sub> + d<sub>2</sub>) / (&lambda; &times; d<sub>1</sub> &times; d<sub>2</sub>) ]<br>
+              J(v) &approx; 6.9 + 20 log<sub>10</sub>[ &radic;((v &minus; 0.1)&sup2; + 1) + v &minus; 0.1 ] dB
+            </div>
+          </div>
+
+          <!-- 5. Airspace Cubes & Multi-Station -->
+          <div class="explainer-card">
+            <div class="explainer-header">
+              <span class="explainer-num">5</span>
+              <div>
+                <div class="explainer-title">1,000-ft Airspace Cubes &amp; Multi-Station N-Coverage</div>
+                <div class="explainer-subtitle">Voxelized atmosphere &amp; sensor redundancy</div>
+              </div>
+            </div>
+            <p class="explainer-body">
+              European airspace is voxelized in 1,000-ft vertical increments (Flight Levels FL010 to FL600). The <b>Coverage Floor</b> marks the lowest flight level where line-of-sight and clearance are established above the Alps, Pyrenees, and Carpathians.
+            </p>
+            <div class="explainer-body">
+              <b>Multi-Station Redundancy Tiers:</b>
+              <ul style="margin: 6px 0 0 16px; padding: 0;">
+                <li><span style="color: var(--accent-red); font-weight:600;">0 Stations:</span> Radio shadow &mdash; blind zone beneath mountain horizon.</li>
+                <li><span style="color: var(--accent-yellow); font-weight:600;">1 Station (Single Coverage):</span> Basic RNAV or secondary surveillance tracking.</li>
+                <li><span style="color: var(--accent-blue); font-weight:600;">2 Stations (Dual Redundancy):</span> Fail-safe tracking against single sensor outage.</li>
+                <li><span style="color: var(--accent-green); font-weight:600;">3+ Stations (WAM Multilateration):</span> High-precision hyperbolic Time Difference of Arrival (TDOA) position verification.</li>
+              </ul>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Tab 5: Prototype Dependencies -->
+      <div id="tab-dependencies" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title">Open Source Prototype Ledger</div>
+          <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px;">
+            Record of third-party open-source components used for rapid prototyping and the roadmap to replace each with
+            custom in-house implementations.
+          </p>
+          <div id="dependenciesContainer">Loading dependencies matrix...</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Map & Profile Area -->
+    <div class="content-area">
+      <div class="map-viewport-wrapper">
+        <div id="map"></div>
+
+        <!-- Side Elevation View Panel in FL10 (1000 ft) increments -->
+        <div id="sideElevationPanel" class="side-elevation-panel" style="display: none;">
+          <div class="side-panel-header">
+            <div style="font-weight: 700; color: #fff; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+              <span>📊 Vertical Airspace Profile</span>
+              <span class="badge" style="font-size: 10px;">FL10 Steps</span>
+            </div>
+            <button class="btn-close" onclick="closeSidePanel()" title="Close side view">&times;</button>
+          </div>
+          <div id="sideProbeLocation" style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+            Click any point on the map to inspect vertical column.
+          </div>
+          <div class="fl-ladder-legend">
+            <span class="legend-item"><span class="dot dot-clear"></span>Clear</span>
+            <span class="legend-item"><span class="dot dot-shadow"></span>Shadow</span>
+            <span class="legend-item"><span class="dot dot-cone"></span>Cone Null</span>
+            <span class="legend-item"><span class="dot dot-ground"></span>Ground</span>
+          </div>
+          <div id="flLadderList" class="fl-ladder-list">
+            <!-- Dynamic FL blocks from FL600 down to FL010 -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Elevation & Fresnel Cross Section -->
+      <div class="profile-drawer">
+        <div class="profile-header">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 13px; font-weight: 700; color: #fff;">Elevation &amp; Fresnel Zone Profile</span>
+            <span id="profileStatusBadge" class="status-badge status-clear">CLEAR LOS</span>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">
+            EU-DEM 25m &middot; Earth Curvature (k=4/3) &middot; 1st Fresnel Clearance (60%)
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Baseline Distance</div>
+            <div class="stat-value" id="statDistance">-- km</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Min Fresnel Clearance</div>
+            <div class="stat-value" id="statClearance">-- m</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Elevation &amp; Cone of Silence</div>
+            <div class="stat-value" id="statElevationAngle">--&deg; (Clear)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Earth Curvature Bulge</div>
+            <div class="stat-value" id="statCurvature">-- m (k=4/3)</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Path Loss &amp; Signal</div>
+            <div class="stat-value" id="statPathLoss">-- dB</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Critical Obstacle</div>
+            <div class="stat-value" id="statObstacle">None</div>
+          </div>
+        </div>
+
+        <canvas id="profileChartCanvas"></canvas>
+      </div>
+    </div>
+
+  </div>
+
+  <script src="/static/app.js?v=1.7"></script>
+</body>
+
+</html>

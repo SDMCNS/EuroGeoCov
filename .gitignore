@@ -1,0 +1,67 @@
+# =======================================================
+# EuroGeoCov .gitignore
+# Separates code logic from heavy datasets and binary DBs
+# =======================================================
+
+# --- BigTIFF / Digital Elevation Model Datasets ---
+DEMTIFF/
+data/DEMTIFF/
+*.tif
+*.tiff
+*.TIF
+*.TIFF
+*.ovr
+
+# --- Raw External Datasets ---
+peaks/
+radars and navaids/
+data/raw/
+*.tar
+*.gz
+*.zip
+
+# --- DuckDB Database Files ---
+*.duckdb
+*.duckdb.wal
+*.duckdb.tmp
+data/*.duckdb
+data/*.duckdb.wal
+
+# --- Python Environment & Bytecode ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# --- Logs & Test Runs ---
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- Operating System & Editor ---
+.DS_Store
+Thumbs.db
+ehthumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

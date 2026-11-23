@@ -1,0 +1,18 @@
+name,latitude,longitude,meters,country
+# TEMPLATE GUIDE: European Peaks
+# name: Peak summit name (string)
+# latitude: Latitude in WGS84 decimal degrees (-90.0 to 90.0)
+# longitude: Longitude in WGS84 decimal degrees (-180.0 to 180.0)
+# meters: Reported summit elevation above mean sea level (AMSL) in meters (float)
+# country: ISO 3166-1 alpha-2 country code (e.g. FR, IT, CH, AT, DE, ES, NO, GR)
+#
+# Examples:
+Mont Blanc,45.8326,6.8652,4808,FR
+Matterhorn,45.9763,7.6586,4478,CH
+Grossglockner,47.0745,12.6939,3798,AT
+Zugspitze,47.4211,10.9853,2962,DE
+Mount Olympus,40.0884,22.3586,2917,GR
+Galdhopiggen,61.6365,8.3124,2469,NO
+Mulhacen,37.0531,-3.3113,3479,ES
+Etna,37.7510,14.9934,3357,IT
+Ben Nevis,56.7969,-5.0036,1345,GB

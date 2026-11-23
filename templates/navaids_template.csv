@@ -1,0 +1,25 @@
+ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_max_deg
+# TEMPLATE GUIDE: Radio Navigation Aids (VOR, DME, VORTAC, TACAN)
+# ident: 2 or 3-letter ICAO radio navigation aid code (e.g. LAM, CPT, KLO) (string)
+# name: Facility / Station name (string)
+# country: ISO 3166-1 alpha-2 country code (e.g. GB, DE, FR, IT, ES, CH)
+# latitude: WGS84 decimal degrees (-90.0 to 90.0)
+# longitude: WGS84 decimal degrees (-180.0 to 180.0)
+# type: 'VOR-DME', 'DME', 'VOR', 'TACAN', or 'VORTAC'
+# service_category: 'ENROUTE' (Long-range airways) or 'TMA' (Terminal Maneuvering Area / Airport approach)
+# power: 'HIGH' (High-power enroute transmitter) or 'LOW' (Low-power terminal area transmitter)
+# elevation_ft: Reported site elevation above mean sea level in feet (optional, will be validated against EU-DEM)
+# frequency_khz: Radio carrier frequency in kHz (e.g. 115600 for 115.60 MHz VHF)
+# dme_channel: UHF paired DME channel code (e.g. 103X, 40X)
+# range_nm: Designated Operational Coverage (DOC) range in nautical miles:
+#           - LOW Power / TMA: 25.0 to 40.0 NM (airport terminal area only)
+#           - HIGH Power / ENROUTE: 130.0 NM (en-route airway navigation)
+# elevation_max_deg: Overhead cone of silence cutoff angle (default: 60.0 degrees)
+#
+# Examples:
+LAM,Lambourne,GB,51.6464,0.1517,VOR-DME,ENROUTE,HIGH,320,115600,103X,130.0,60.0
+CPT,Compton,GB,51.4914,-1.2197,VOR-DME,ENROUTE,HIGH,540,114350,90Y,130.0,60.0
+KLO,Kloten,CH,47.4583,8.5489,VOR-DME,TMA,LOW,1420,114850,95Y,40.0,60.0
+GVA,Geneve Cointrin,CH,46.2514,6.1081,VOR-DME,TMA,LOW,1410,115750,104X,40.0,60.0
+NAT,Nantes Atlantique,FR,47.1532,-1.6114,VOR-DME,ENROUTE,HIGH,90,115500,102X,130.0,60.0
+PSA,Pisa San Giusto,IT,43.6839,10.3956,VOR-DME,TMA,LOW,10,112200,69X,25.0,60.0
