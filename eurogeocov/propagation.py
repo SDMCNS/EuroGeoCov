@@ -89,6 +89,7 @@ class PropagationEngine:
         max_flight_level_ft: float = DEFAULT_MAX_FLIGHT_LEVEL_FT,
         max_operational_range_km: float = DEFAULT_MAX_OPERATIONAL_RANGE_KM,
         dem_reader: Optional[DEMReader] = None,
+        profile_cache: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Evaluate full Point-to-Point Line of Sight along terrain cross-section,
         accounting for:
@@ -110,6 +111,7 @@ class PropagationEngine:
             max_flight_level_ft: Maximum useful service flight level in feet (default FL600 / 60,000 ft).
             max_operational_range_km: Maximum useful operational range in km (default 200 NM / ~370.4 km).
             dem_reader: Optional override DEMReader instance.
+            profile_cache: Optional pre-sampled elevation profile dict to skip redundant DEM lookups.
 
         Returns:
             Dictionary containing LoS boolean results, clearances, Fresnel profile,
@@ -119,8 +121,11 @@ class PropagationEngine:
         if not reader:
             raise ValueError("A DEMReader must be provided to evaluate terrain LoS.")
 
-        # 1. Sample profile from EU-DEM
-        prof = reader.get_elevation_profile(tx_lon, tx_lat, rx_lon, rx_lat, num_points=num_points)
+        # 1. Sample profile from EU-DEM (or use cached profile if provided)
+        if profile_cache is not None:
+            prof = profile_cache
+        else:
+            prof = reader.get_elevation_profile(tx_lon, tx_lat, rx_lon, rx_lat, num_points=num_points)
 
         distances = np.array(prof["distances_m"])
         terrain_elevations = np.array(prof["elevations_m"])

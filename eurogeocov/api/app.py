@@ -717,6 +717,7 @@ def get_elevation_point(lat: float, lon: float) -> Dict[str, Any]:
 
 
 @app.post("/api/los/profile")
+@app.post("/api/los/evaluate")
 def calculate_los(req: LOSRequest) -> Dict[str, Any]:
     """Calculate point-to-point Line of Sight, Fresnel zone, and terrain obstacles."""
     if not g_prop or not g_dem:

@@ -53,7 +53,8 @@ class AirspaceCoverageEngine:
         cube: AirspaceCube,
         stations: List[Dict[str, Any]],
         frequency_hz: float = DEFAULT_FREQUENCIES["SSR_ADSB_RECEIVE"],
-        num_profile_points: int = 150
+        num_profile_points: int = 150,
+        station_profiles: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Assess radio coverage at a specific 1000-ft airspace cube from a list of stations.
 
@@ -103,6 +104,9 @@ class AirspaceCoverageEngine:
             max_range_km = float(st.get("range_km") or st.get("doc_range_km") or st.get("max_operational_range_km") or 400.0)
             st_freq = float(st.get("frequency_hz") or (float(st.get("frequency_khz")) * 1000.0 if st.get("frequency_khz") else frequency_hz))
 
+            st_key = str(st.get("id") or f"{st_lat:.5f}_{st_lon:.5f}")
+            cached_prof = station_profiles.get(st_key) if station_profiles else None
+
             los_eval = self.prop_engine.evaluate_los(
                 tx_lon=st_lon,
                 tx_lat=st_lat,
@@ -117,7 +121,8 @@ class AirspaceCoverageEngine:
                 elevation_min_deg=min_el_deg,
                 cone_of_silence_deg=cone_deg,
                 max_operational_range_km=max_range_km,
-                dem_reader=self.dem_reader
+                dem_reader=self.dem_reader,
+                profile_cache=cached_prof,
             )
 
             is_opt_los = los_eval["has_los"]
@@ -231,9 +236,24 @@ class AirspaceCoverageEngine:
         cube_results = []
         coverage_floor_ft = None
 
+        # Pre-sample terrain profile for each station once across all altitudes
+        station_profiles = {}
+        if self.dem_reader:
+            for st in stations:
+                try:
+                    s_lat = float(st.get("latitude") or st.get("lat"))
+                    s_lon = float(st.get("longitude") or st.get("lon"))
+                    s_key = str(st.get("id") or f"{s_lat:.5f}_{s_lon:.5f}")
+                    prof = self.dem_reader.get_elevation_profile(s_lon, s_lat, lon, lat, num_points=60)
+                    station_profiles[s_key] = prof
+                except Exception:
+                    pass
+
         for alt_ft in altitudes:
             cube = AirspaceCube(center_lat=lat, center_lon=lon, center_alt_ft=float(alt_ft))
-            res = self.evaluate_cube_coverage(cube, stations, frequency_hz=frequency_hz, num_profile_points=100)
+            res = self.evaluate_cube_coverage(
+                cube, stations, frequency_hz=frequency_hz, num_profile_points=60, station_profiles=station_profiles
+            )
             primary = res["station_details"][0] if res.get("station_details") else {}
             details = res.get("station_details", [])
 
