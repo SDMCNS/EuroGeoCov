@@ -4,6 +4,7 @@ Performs efficient out-of-core windowed reads, multi-point sampling,
 profile extraction, and multi-scale bounding-box raster queries on the 24GB GeoTIFF.
 """
 
+import threading
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 import numpy as np
@@ -31,11 +32,13 @@ class DEMReader:
         self.width = self._dataset.width
         self.height = self._dataset.height
         self.nodata = self._dataset.nodata
+        self._lock = threading.Lock()
 
     def close(self):
         """Close the underlying dataset handle."""
-        if self._dataset and not self._dataset.closed:
-            self._dataset.close()
+        with self._lock:
+            if self._dataset and not self._dataset.closed:
+                self._dataset.close()
 
     def __enter__(self):
         return self
@@ -65,27 +68,28 @@ class DEMReader:
         if not valid_coords:
             return results
 
-        try:
-            samples = self._dataset.sample(valid_coords)
-            for idx, val in zip(valid_indices, samples):
-                try:
-                    elev = float(val[0])
-                    if np.isnan(elev) or (self.nodata is not None and elev == self.nodata) or elev < -500:
-                        elev = 0.0
-                    results[idx] = elev
-                except Exception:
-                    results[idx] = 0.0
-        except Exception:
-            # Fallback point-by-point to gracefully bypass unreadable / corrupted raster tiles
-            for idx, coord in zip(valid_indices, valid_coords):
-                try:
-                    s = list(self._dataset.sample([coord]))
-                    val = float(s[0][0])
-                    if np.isnan(val) or (self.nodata is not None and val == self.nodata) or val < -500:
-                        val = 0.0
-                    results[idx] = val
-                except Exception:
-                    results[idx] = 0.0
+        with self._lock:
+            try:
+                samples = list(self._dataset.sample(valid_coords))
+                for idx, val in zip(valid_indices, samples):
+                    try:
+                        elev = float(val[0])
+                        if np.isnan(elev) or (self.nodata is not None and elev == self.nodata) or elev < -500:
+                            elev = 0.0
+                        results[idx] = elev
+                    except Exception:
+                        results[idx] = 0.0
+            except Exception:
+                # Fallback point-by-point to gracefully bypass unreadable / corrupted raster tiles
+                for idx, coord in zip(valid_indices, valid_coords):
+                    try:
+                        s = list(self._dataset.sample([coord]))
+                        val = float(s[0][0])
+                        if np.isnan(val) or (self.nodata is not None and val == self.nodata) or val < -500:
+                            val = 0.0
+                        results[idx] = val
+                    except Exception:
+                        results[idx] = 0.0
 
         return results
 
@@ -189,12 +193,13 @@ class DEMReader:
         out_w = max(1, int(win_w / scale))
         out_h = max(1, int(win_h / scale))
 
-        data = self._dataset.read(
-            1,
-            window=window,
-            out_shape=(out_h, out_w),
-            resampling=Resampling.bilinear
-        )
+        with self._lock:
+            data = self._dataset.read(
+                1,
+                window=window,
+                out_shape=(out_h, out_w),
+                resampling=Resampling.bilinear
+            )
 
         data = np.where(np.isnan(data) | (data < -500), 0.0, data)
 
