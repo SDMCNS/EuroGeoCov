@@ -15,6 +15,7 @@ The system evaluates:
 4. **Client-Side Merged Airspace Boundaries**: Turf.js geometric polygon union of multiple facilities into a seamless merged coverage footprint with non-overlapping area calculation ($\text{km}^2$).
 5. **Airspace 1000-ft Voxel Cubes**: Interactive vertical column ladder analysis from FL010 to FL600 over any ground point within a radar, VOR, or DME facility's coverage.
 6. **Station Creator & Custom Geodatabase**: Built-in UI and CLI ingestion pipeline to create custom stations, auto-enrich ground elevations from the EU-DEM GeoTIFF, and calculate over-the-horizon coverage.
+7. **Interactive 3D Airspace Coverage Volume**: WebGL 3D solid mesh modal of any site's airspace coverage volume powered by Three.js and OrbitControls. Features outer faceted terrain-cut shells across altitudes, inverted zenith silence cones, ground compass grid with range rings, antenna mast pin, variable vertical exaggeration (1x to 10x), material themes (Hologram Cyan, Radar Emerald, Sunset Amber, Tactical Wireframe), turntable auto-rotation, and integrated 3D volumetric calculations ($\text{km}^3$).
 
 ---
 

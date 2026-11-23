@@ -469,6 +469,98 @@ def get_facilities_coverage(
     }
 
 
+@app.get("/api/facilities/{facility_id}/volume-3d")
+def get_facility_volume_3d(
+    facility_id: str,
+    max_flight_level_ft: float = Query(60000.0, description="Ceiling altitude in feet (e.g. 60000)"),
+    min_flight_level_ft: float = Query(1000.0, description="Floor altitude in feet (e.g. 1000)"),
+    num_slices: int = Query(15, ge=4, le=60, description="Number of vertical slices between floor and ceiling"),
+    max_range_km: Optional[float] = Query(None, description="Override maximum range in km"),
+    use_doc_range: bool = Query(False, description="Whether to cap by documented operational range")
+) -> Dict[str, Any]:
+    """Compute 3D coverage volume slices and total volumetric airspace (km^3) for a facility."""
+    if not g_db:
+        raise HTTPException(status_code=503, detail="Geodatabase not initialized")
+
+    profiles = g_db.get_facility_horizon_profiles(facility_ids=[facility_id])
+    if not profiles:
+        raise HTTPException(status_code=404, detail=f"Facility '{facility_id}' not found or lacks FL600 horizon profile")
+
+    profile = profiles[0]
+    cap_km = max_range_km
+    if use_doc_range and profile.get("doc_range_km"):
+        cap_km = min(cap_km, profile["doc_range_km"]) if cap_km else profile["doc_range_km"]
+
+    import math
+    import numpy as np
+    from eurogeocov.coverage_precalculator import evaluate_coverage_dynamically
+
+    # Generate altitude levels from min_flight_level_ft to max_flight_level_ft
+    fl_levels = np.linspace(max(500.0, min_flight_level_ft), max(1000.0, max_flight_level_ft), num_slices)
+
+    tx_amsl_m = float(profile.get("tx_amsl_m") or 0.0)
+    slices = []
+    total_volume_km3 = 0.0
+
+    prev_area_km2 = None
+    prev_z_km = None
+
+    for fl in fl_levels:
+        res = evaluate_coverage_dynamically(profile, flight_level_ft=float(fl), max_range_km=cap_km)
+        alt_m = round(float(fl) * 0.3048, 1)
+        z_km = round((alt_m - tx_amsl_m) / 1000.0, 3)
+
+        radials = res.get("radial_lines", [])
+        outer_radii = [r["reach_km"] for r in radials]
+        cut_flags = [bool(r["is_cut"]) for r in radials]
+        inner_r = float(res.get("inner_cone_radius_km") or 0.0)
+        area_km2 = float(res.get("metrics", {}).get("coverage_area_sq_km") or 0.0)
+
+        # Trapezoidal slice integration for 3D volume
+        if prev_area_km2 is not None and prev_z_km is not None:
+            dz_km = max(0.0, z_km - prev_z_km)
+            # Frustum volume: dz * (A1 + A2 + sqrt(A1 * A2)) / 3.0
+            frustum_vol = (dz_km / 3.0) * (prev_area_km2 + area_km2 + math.sqrt(max(0.0, prev_area_km2 * area_km2)))
+            total_volume_km3 += frustum_vol
+
+        prev_area_km2 = area_km2
+        prev_z_km = z_km
+
+        slices.append({
+            "flight_level_ft": round(float(fl)),
+            "alt_m": alt_m,
+            "z_km": z_km,
+            "inner_radius_km": inner_r,
+            "outer_radii_km": outer_radii,
+            "cut_flags": cut_flags,
+            "area_sq_km": area_km2
+        })
+
+    num_radials = len(slices[0]["outer_radii_km"]) if slices else 72
+    azimuths_deg = [round(i * (360.0 / num_radials), 1) for i in range(num_radials)]
+
+    return {
+        "facility_id": profile.get("facility_id"),
+        "ident": profile.get("ident"),
+        "name": profile.get("name"),
+        "category": profile.get("category"),
+        "type": profile.get("type"),
+        "country": profile.get("country"),
+        "country_name": profile.get("country_name"),
+        "latitude": profile.get("latitude"),
+        "longitude": profile.get("longitude"),
+        "tx_amsl_m": tx_amsl_m,
+        "ground_elev_m": profile.get("ground_elev_m"),
+        "mast_height_m": profile.get("mast_height_m"),
+        "elevation_limits": [profile.get("elevation_min_deg", 0.5), profile.get("elevation_max_deg", 34.0)],
+        "ceiling_flight_level_ft": round(max_flight_level_ft),
+        "floor_flight_level_ft": round(min_flight_level_ft),
+        "total_volume_km3": round(total_volume_km3, 1),
+        "azimuths_deg": azimuths_deg,
+        "slices": slices
+    }
+
+
 @app.post("/api/facilities/custom")
 def create_custom_facility(req: CustomFacilityCreateRequest) -> Dict[str, Any]:
     """Create a new custom station/facility, compute DEM elevation and FL600 horizon profile."""

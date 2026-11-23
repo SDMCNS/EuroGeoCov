@@ -263,6 +263,26 @@ class TestAPI(unittest.TestCase):
         self.assertIn("ident,name,country,latitude,longitude,type,service_category,power,elevation_ft", text)
         self.assertIn("GVA,Geneve Cointrin,CH,46.2514,6.1081,VOR-DME,TMA,LOW,1410,115750,104X,40.0,30.0,150.0", text)
 
+    def test_18_facility_volume_3d(self):
+        # Existing station RAD_333
+        res = self.client.get("/api/facilities/RAD_333/volume-3d?max_flight_level_ft=40000&num_slices=10")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["ident"], "RAD_333")
+        self.assertEqual(data["ceiling_flight_level_ft"], 40000)
+        self.assertGreater(data["total_volume_km3"], 100000.0)
+        self.assertEqual(len(data["slices"]), 10)
+        first_slice = data["slices"][0]
+        self.assertIn("outer_radii_km", first_slice)
+        self.assertIn("inner_radius_km", first_slice)
+        self.assertEqual(len(first_slice["outer_radii_km"]), 72)
+        self.assertIn("azimuths_deg", data)
+        self.assertEqual(len(data["azimuths_deg"]), 72)
+
+        # Non-existent facility returns 404
+        res_404 = self.client.get("/api/facilities/NON_EXISTENT_9999/volume-3d")
+        self.assertEqual(res_404.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

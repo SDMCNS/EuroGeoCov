@@ -15,7 +15,11 @@
   <!-- Turf.js for fast client-side coverage polygon union & geometric analysis -->
   <script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
 
-  <link rel="stylesheet" href="/static/style.css?v=1.4">
+  <!-- Three.js & OrbitControls for 3D Coverage Volume Modal -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <link rel="stylesheet" href="/static/style.css?v=2.1">
 </head>
 
 <body>
@@ -377,6 +381,9 @@
               <select id="rayStationSelect" onchange="onRayStationSelect(this.value)">
                 <option value="">-- Select an active station --</option>
               </select>
+              <button type="button" class="btn btn-secondary" onclick="openCoverage3DModal(activeRayStationId)" style="padding: 4px 8px; font-size: 11px; margin-top: 6px; width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px;">
+                <span>🧊</span> <b>Inspect 3D Airspace Volume Modal</b>
+              </button>
             </div>
 
             <!-- Ray Azimuth Slider -->
@@ -996,7 +1003,108 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
 
   </div>
 
-  <script src="/static/app.js?v=2.0"></script>
+  <!-- 3D Coverage Volume Modal -->
+  <div id="modalCoverage3D" class="modal-backdrop" style="display: none;">
+    <div class="modal-3d-dialog">
+      <div class="modal-3d-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">🧊</span>
+          <div>
+            <div style="font-size: 15px; font-weight: 700; color: #fff;" id="modal3DTitle">3D Airspace Coverage Volume</div>
+            <div style="font-size: 11px; color: var(--text-muted);" id="modal3DSubtitle">Interactive WebGL Volumetric Mesh &middot; EU-DEM Terrain Cuts &amp; Zenith Radiation Cone</div>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeCoverage3DModal()" title="Close 3D View">&times;</button>
+      </div>
+
+      <!-- Controls toolbar -->
+      <div class="modal-3d-toolbar">
+        <div class="control-group-inline">
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">Ceiling:</label>
+          <select id="modal3DCeilingSelect" class="form-control" style="width: 105px; padding: 3px 6px; font-size: 11px;" onchange="updateCoverage3DCeiling()">
+            <option value="60000" selected>FL600 (60k ft)</option>
+            <option value="50000">FL500 (50k ft)</option>
+            <option value="40000">FL400 (40k ft)</option>
+            <option value="30000">FL300 (30k ft)</option>
+            <option value="20000">FL200 (20k ft)</option>
+            <option value="10000">FL100 (10k ft)</option>
+            <option value="5000">FL050 (5k ft)</option>
+          </select>
+        </div>
+
+        <div class="control-group-inline">
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">Vert. Exagg:</label>
+          <select id="modal3DExaggeration" class="form-control" style="width: 80px; padding: 3px 6px; font-size: 11px;" onchange="updateCoverage3DMesh()">
+            <option value="1">1x (True)</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+            <option value="6" selected>6x</option>
+            <option value="10">10x</option>
+          </select>
+        </div>
+
+        <div class="control-group-inline">
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">Theme:</label>
+          <select id="modal3DTheme" class="form-control" style="width: 120px; padding: 3px 6px; font-size: 11px;" onchange="updateCoverage3DTheme()">
+            <option value="cyan" selected>Hologram Cyan</option>
+            <option value="radar">Radar Emerald</option>
+            <option value="amber">Sunset Amber</option>
+            <option value="wireframe">Tactical Wireframe</option>
+          </select>
+        </div>
+
+        <div class="control-group-inline" style="gap: 10px;">
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ccc; cursor: pointer; margin-bottom: 0;">
+            <input type="checkbox" id="modal3DConeToggle" checked onchange="toggleCoverage3DCone()">
+            Silence Cone
+          </label>
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: #ccc; cursor: pointer; margin-bottom: 0;">
+            <input type="checkbox" id="modal3DRingsToggle" checked onchange="toggleCoverage3DRings()">
+            Range Rings
+          </label>
+        </div>
+
+        <div style="margin-left: auto; display: flex; gap: 6px;">
+          <button id="modal3DRotateBtn" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="toggleCoverage3DAutoRotate()">🔄 Turntable</button>
+          <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="resetCoverage3DCamera()">🎯 Reset View</button>
+        </div>
+      </div>
+
+      <!-- 3D WebGL Canvas Container -->
+      <div id="threeVolumeContainer" class="three-canvas-container">
+        <div id="threeVolumeSpinner" class="three-loading-spinner" style="display: none;">
+          <div class="spinner"></div>
+          <div style="font-size: 12px; color: #aaa; margin-top: 8px;">Generating 3D Volumetric Mesh...</div>
+        </div>
+      </div>
+
+      <!-- Stats footer -->
+      <div class="modal-3d-footer">
+        <div class="stat-card" style="padding: 6px 12px; flex: 1;">
+          <div class="stat-label">Total Volume</div>
+          <div class="stat-value" id="modal3DStatVolume" style="font-size: 14px; color: var(--accent-blue);">-- km³</div>
+        </div>
+        <div class="stat-card" style="padding: 6px 12px; flex: 1;">
+          <div class="stat-label">Airspace Bracket</div>
+          <div class="stat-value" id="modal3DStatBracket" style="font-size: 14px; color: #fff;">FL010 - FL600</div>
+        </div>
+        <div class="stat-card" style="padding: 6px 12px; flex: 1;">
+          <div class="stat-label">Max Reach @ Ceiling</div>
+          <div class="stat-value" id="modal3DStatReach" style="font-size: 14px; color: var(--accent-green);">-- km</div>
+        </div>
+        <div class="stat-card" style="padding: 6px 12px; flex: 1;">
+          <div class="stat-label">Silence Cone Radius</div>
+          <div class="stat-value" id="modal3DStatCone" style="font-size: 14px; color: #ffab40;">-- km</div>
+        </div>
+        <div class="stat-card" style="padding: 6px 12px; flex: 1;">
+          <div class="stat-label">Station AMSL / Mast</div>
+          <div class="stat-value" id="modal3DStatTx" style="font-size: 14px; color: #aaa;">-- m AMSL</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js?v=2.1"></script>
 </body>
 
 </html>

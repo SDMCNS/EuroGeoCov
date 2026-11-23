@@ -511,7 +511,8 @@ class GeoDatabase:
 
         if facility_ids:
             placeholders = ", ".join(["?"] * len(facility_ids))
-            sql += f" AND facility_id IN ({placeholders})"
+            sql += f" AND (facility_id IN ({placeholders}) OR ident IN ({placeholders}))"
+            params.extend(facility_ids)
             params.extend(facility_ids)
         if country:
             sql += " AND lower(country) = lower(?)"
@@ -541,7 +542,7 @@ class GeoDatabase:
         for c in self.get_custom_facilities():
             if not c.get("step_dists_json") or not c.get("theta_horizon_matrix_json"):
                 continue
-            if facility_ids and c.get("id") not in facility_ids:
+            if facility_ids and c.get("id") not in facility_ids and c.get("ident") not in facility_ids:
                 continue
             if country and (c.get("country") or "").lower() != country.strip().lower():
                 continue
@@ -616,7 +617,8 @@ class GeoDatabase:
 
         if facility_ids:
             placeholders = ", ".join(["?"] * len(facility_ids))
-            sql += f" AND facility_id IN ({placeholders})"
+            sql += f" AND (facility_id IN ({placeholders}) OR ident IN ({placeholders}))"
+            params.extend(facility_ids)
             params.extend(facility_ids)
         if country:
             sql += " AND lower(country) = lower(?)"
