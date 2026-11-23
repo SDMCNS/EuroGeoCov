@@ -19,7 +19,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
-  <link rel="stylesheet" href="/static/style.css?v=2.1">
+  <link rel="stylesheet" href="/static/style.css?v=2.2">
 </head>
 
 <body>
@@ -364,6 +364,7 @@
 
           <button class="btn" onclick="runMultiStationCoverage()">⚡ Load &amp; Merge Precalculated Coverage</button>
           <button class="btn btn-secondary" style="margin-top:8px;" onclick="enableMapProbe()">📍 Click Map Point to Inspect Multi-Station 1000ft Airspace Column</button>
+          <button class="btn btn-secondary" style="margin-top:8px; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1); color: var(--accent-cyan); font-weight: 600;" onclick="openCoverage3DMultiSiteModal()">🧊 View All Selected Sites in 3D Sculpture</button>
 
           <!-- Ray Elevation & Fresnel Profile Sweep & Inspection -->
           <div class="panel-section" id="rayInspectionSection" style="margin-top: 14px; background: rgba(22, 27, 34, 0.7); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px;">
@@ -1020,6 +1021,14 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
       <!-- Controls toolbar -->
       <div class="modal-3d-toolbar">
         <div class="control-group-inline">
+          <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">View Mode:</label>
+          <div style="display: flex; gap: 4px;">
+            <button id="modal3DModeSingleBtn" class="btn btn-secondary active" style="padding: 3px 8px; font-size: 11px; background: rgba(88, 166, 255, 0.2); border-color: var(--accent-blue); color: #fff;" onclick="switch3DMode('single')">Single Site</button>
+            <button id="modal3DModeMultiBtn" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="switch3DMode('multi')">🌐 All Selected Sites Sculpture</button>
+          </div>
+        </div>
+
+        <div class="control-group-inline">
           <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">Ceiling:</label>
           <select id="modal3DCeilingSelect" class="form-control" style="width: 105px; padding: 3px 6px; font-size: 11px;" onchange="updateCoverage3DCeiling()">
             <option value="60000" selected>FL600 (60k ft)</option>
@@ -1046,7 +1055,8 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
         <div class="control-group-inline">
           <label style="font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 0;">Theme:</label>
           <select id="modal3DTheme" class="form-control" style="width: 120px; padding: 3px 6px; font-size: 11px;" onchange="updateCoverage3DTheme()">
-            <option value="cyan" selected>Hologram Cyan</option>
+            <option value="multi" selected>Multi-Color Rainbow</option>
+            <option value="cyan">Hologram Cyan</option>
             <option value="radar">Radar Emerald</option>
             <option value="amber">Sunset Amber</option>
             <option value="wireframe">Tactical Wireframe</option>
@@ -1070,11 +1080,14 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
         </div>
       </div>
 
+      <!-- Station Pills / Legend Bar for Multi-Site Sculpture -->
+      <div id="modal3DStationBadges" class="modal-3d-badges-bar" style="display: none;"></div>
+
       <!-- 3D WebGL Canvas Container -->
       <div id="threeVolumeContainer" class="three-canvas-container">
         <div id="threeVolumeSpinner" class="three-loading-spinner" style="display: none;">
           <div class="spinner"></div>
-          <div style="font-size: 12px; color: #aaa; margin-top: 8px;">Generating 3D Volumetric Mesh...</div>
+          <div style="font-size: 12px; color: #aaa; margin-top: 8px;" id="threeVolumeSpinnerText">Generating 3D Volumetric Mesh...</div>
         </div>
       </div>
 
@@ -1085,26 +1098,26 @@ python scripts/ingest_custom_data.py --file templates/navaids_template.csv --typ
           <div class="stat-value" id="modal3DStatVolume" style="font-size: 14px; color: var(--accent-blue);">-- km³</div>
         </div>
         <div class="stat-card" style="padding: 6px 12px; flex: 1;">
-          <div class="stat-label">Airspace Bracket</div>
+          <div class="stat-label" id="modal3DStatBracketLabel">Airspace Bracket</div>
           <div class="stat-value" id="modal3DStatBracket" style="font-size: 14px; color: #fff;">FL010 - FL600</div>
         </div>
         <div class="stat-card" style="padding: 6px 12px; flex: 1;">
-          <div class="stat-label">Max Reach @ Ceiling</div>
+          <div class="stat-label" id="modal3DStatReachLabel">Max Reach @ Ceiling</div>
           <div class="stat-value" id="modal3DStatReach" style="font-size: 14px; color: var(--accent-green);">-- km</div>
         </div>
         <div class="stat-card" style="padding: 6px 12px; flex: 1;">
-          <div class="stat-label">Silence Cone Radius</div>
+          <div class="stat-label" id="modal3DStatConeLabel">Silence Cone Radius</div>
           <div class="stat-value" id="modal3DStatCone" style="font-size: 14px; color: #ffab40;">-- km</div>
         </div>
         <div class="stat-card" style="padding: 6px 12px; flex: 1;">
-          <div class="stat-label">Station AMSL / Mast</div>
+          <div class="stat-label" id="modal3DStatTxLabel">Station AMSL / Mast</div>
           <div class="stat-value" id="modal3DStatTx" style="font-size: 14px; color: #aaa;">-- m AMSL</div>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="/static/app.js?v=2.1"></script>
+  <script src="/static/app.js?v=2.2"></script>
 </body>
 
 </html>

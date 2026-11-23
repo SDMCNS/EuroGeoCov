@@ -469,31 +469,21 @@ def get_facilities_coverage(
     }
 
 
-@app.get("/api/facilities/{facility_id}/volume-3d")
-def get_facility_volume_3d(
-    facility_id: str,
-    max_flight_level_ft: float = Query(60000.0, description="Ceiling altitude in feet (e.g. 60000)"),
-    min_flight_level_ft: float = Query(1000.0, description="Floor altitude in feet (e.g. 1000)"),
-    num_slices: int = Query(15, ge=4, le=60, description="Number of vertical slices between floor and ceiling"),
-    max_range_km: Optional[float] = Query(None, description="Override maximum range in km"),
-    use_doc_range: bool = Query(False, description="Whether to cap by documented operational range")
+def _compute_facility_volume_3d(
+    profile: Dict[str, Any],
+    max_flight_level_ft: float = 60000.0,
+    min_flight_level_ft: float = 1000.0,
+    num_slices: int = 15,
+    max_range_km: Optional[float] = None,
+    use_doc_range: bool = False
 ) -> Dict[str, Any]:
-    """Compute 3D coverage volume slices and total volumetric airspace (km^3) for a facility."""
-    if not g_db:
-        raise HTTPException(status_code=503, detail="Geodatabase not initialized")
-
-    profiles = g_db.get_facility_horizon_profiles(facility_ids=[facility_id])
-    if not profiles:
-        raise HTTPException(status_code=404, detail=f"Facility '{facility_id}' not found or lacks FL600 horizon profile")
-
-    profile = profiles[0]
-    cap_km = max_range_km
-    if use_doc_range and profile.get("doc_range_km"):
-        cap_km = min(cap_km, profile["doc_range_km"]) if cap_km else profile["doc_range_km"]
-
     import math
     import numpy as np
     from eurogeocov.coverage_precalculator import evaluate_coverage_dynamically
+
+    cap_km = max_range_km
+    if use_doc_range and profile.get("doc_range_km"):
+        cap_km = min(cap_km, profile["doc_range_km"]) if cap_km else profile["doc_range_km"]
 
     # Generate altitude levels from min_flight_level_ft to max_flight_level_ft
     fl_levels = np.linspace(max(500.0, min_flight_level_ft), max(1000.0, max_flight_level_ft), num_slices)
@@ -519,7 +509,6 @@ def get_facility_volume_3d(
         # Trapezoidal slice integration for 3D volume
         if prev_area_km2 is not None and prev_z_km is not None:
             dz_km = max(0.0, z_km - prev_z_km)
-            # Frustum volume: dz * (A1 + A2 + sqrt(A1 * A2)) / 3.0
             frustum_vol = (dz_km / 3.0) * (prev_area_km2 + area_km2 + math.sqrt(max(0.0, prev_area_km2 * area_km2)))
             total_volume_km3 += frustum_vol
 
@@ -549,6 +538,8 @@ def get_facility_volume_3d(
         "country_name": profile.get("country_name"),
         "latitude": profile.get("latitude"),
         "longitude": profile.get("longitude"),
+        "x_laea": float(profile.get("x_laea") or 0.0),
+        "y_laea": float(profile.get("y_laea") or 0.0),
         "tx_amsl_m": tx_amsl_m,
         "ground_elev_m": profile.get("ground_elev_m"),
         "mast_height_m": profile.get("mast_height_m"),
@@ -559,6 +550,116 @@ def get_facility_volume_3d(
         "azimuths_deg": azimuths_deg,
         "slices": slices
     }
+
+
+@app.get("/api/facilities/volume-3d-multi")
+def get_facilities_volume_3d_multi(
+    ids: str = Query(..., description="Comma-separated facility IDs or idents"),
+    max_flight_level_ft: float = Query(60000.0, description="Ceiling altitude in feet (e.g. 60000)"),
+    min_flight_level_ft: float = Query(1000.0, description="Floor altitude in feet (e.g. 1000)"),
+    num_slices: int = Query(12, ge=4, le=60, description="Number of vertical slices between floor and ceiling"),
+    max_range_km: Optional[float] = Query(None, description="Override maximum range in km"),
+    use_doc_range: bool = Query(False, description="Whether to cap by documented operational range")
+) -> Dict[str, Any]:
+    """Compute 3D coverage volumes for multiple facilities positioned in true geographic coordinates."""
+    if not g_db:
+        raise HTTPException(status_code=503, detail="Geodatabase not initialized")
+
+    fac_ids = [i.strip() for i in ids.split(",") if i.strip()]
+    if not fac_ids:
+        raise HTTPException(status_code=400, detail="No facility IDs provided")
+
+    profiles = g_db.get_facility_horizon_profiles(facility_ids=fac_ids)
+    if not profiles:
+        raise HTTPException(status_code=404, detail="None of the requested facilities were found")
+
+    from eurogeocov.projection import laea_to_wgs84
+
+    # Calculate geographic centroid of all requested facilities in EPSG:3035
+    xs = [float(p.get("x_laea") or 0.0) for p in profiles]
+    ys = [float(p.get("y_laea") or 0.0) for p in profiles]
+    centroid_x = float(sum(xs) / len(xs))
+    centroid_y = float(sum(ys) / len(ys))
+    c_lon, c_lat = laea_to_wgs84(centroid_x, centroid_y)
+
+    facilities_data = []
+    total_sculpture_volume = 0.0
+
+    for p in profiles:
+        f_data = _compute_facility_volume_3d(
+            p,
+            max_flight_level_ft=max_flight_level_ft,
+            min_flight_level_ft=min_flight_level_ft,
+            num_slices=num_slices,
+            max_range_km=max_range_km,
+            use_doc_range=use_doc_range
+        )
+        # Relative coordinates in km from sculpture centroid
+        # In Three.js: +X = East, -Z = North
+        dx_km = round((f_data["x_laea"] - centroid_x) / 1000.0, 2)
+        dz_km = round(-(f_data["y_laea"] - centroid_y) / 1000.0, 2)
+
+        f_data["offset_from_centroid_km"] = {
+            "x": dx_km,
+            "z": dz_km
+        }
+        total_sculpture_volume += f_data["total_volume_km3"]
+        facilities_data.append(f_data)
+
+    min_x = min(f["offset_from_centroid_km"]["x"] - max(f["slices"][-1]["outer_radii_km"]) for f in facilities_data)
+    max_x = max(f["offset_from_centroid_km"]["x"] + max(f["slices"][-1]["outer_radii_km"]) for f in facilities_data)
+    min_z = min(f["offset_from_centroid_km"]["z"] - max(f["slices"][-1]["outer_radii_km"]) for f in facilities_data)
+    max_z = max(f["offset_from_centroid_km"]["z"] + max(f["slices"][-1]["outer_radii_km"]) for f in facilities_data)
+
+    return {
+        "mode": "MULTI_SITE_SCULPTURE",
+        "stations_count": len(facilities_data),
+        "ceiling_flight_level_ft": round(max_flight_level_ft),
+        "floor_flight_level_ft": round(min_flight_level_ft),
+        "total_volume_km3": round(total_sculpture_volume, 1),
+        "centroid": {
+            "x_laea": round(centroid_x, 1),
+            "y_laea": round(centroid_y, 1),
+            "latitude": round(c_lat, 5),
+            "longitude": round(c_lon, 5)
+        },
+        "sculpture_bounds_km": {
+            "min_x": round(min_x, 1),
+            "max_x": round(max_x, 1),
+            "min_z": round(min_z, 1),
+            "max_z": round(max_z, 1),
+            "width_km": round(max_x - min_x, 1),
+            "depth_km": round(max_z - min_z, 1)
+        },
+        "facilities": facilities_data
+    }
+
+
+@app.get("/api/facilities/{facility_id}/volume-3d")
+def get_facility_volume_3d(
+    facility_id: str,
+    max_flight_level_ft: float = Query(60000.0, description="Ceiling altitude in feet (e.g. 60000)"),
+    min_flight_level_ft: float = Query(1000.0, description="Floor altitude in feet (e.g. 1000)"),
+    num_slices: int = Query(15, ge=4, le=60, description="Number of vertical slices between floor and ceiling"),
+    max_range_km: Optional[float] = Query(None, description="Override maximum range in km"),
+    use_doc_range: bool = Query(False, description="Whether to cap by documented operational range")
+) -> Dict[str, Any]:
+    """Compute 3D coverage volume slices and total volumetric airspace (km^3) for a facility."""
+    if not g_db:
+        raise HTTPException(status_code=503, detail="Geodatabase not initialized")
+
+    profiles = g_db.get_facility_horizon_profiles(facility_ids=[facility_id])
+    if not profiles:
+        raise HTTPException(status_code=404, detail=f"Facility '{facility_id}' not found or lacks FL600 horizon profile")
+
+    return _compute_facility_volume_3d(
+        profiles[0],
+        max_flight_level_ft=max_flight_level_ft,
+        min_flight_level_ft=min_flight_level_ft,
+        num_slices=num_slices,
+        max_range_km=max_range_km,
+        use_doc_range=use_doc_range
+    )
 
 
 @app.post("/api/facilities/custom")

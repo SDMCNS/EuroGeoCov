@@ -283,6 +283,34 @@ class TestAPI(unittest.TestCase):
         res_404 = self.client.get("/api/facilities/NON_EXISTENT_9999/volume-3d")
         self.assertEqual(res_404.status_code, 404)
 
+    def test_19_facilities_volume_3d_multi(self):
+        # Multi-facility sculpture query
+        res = self.client.get("/api/facilities/volume-3d-multi?ids=RAD_333,KFT&num_slices=8")
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data["mode"], "MULTI_SITE_SCULPTURE")
+        self.assertEqual(data["stations_count"], 2)
+        self.assertGreater(data["total_volume_km3"], 500000.0)
+        self.assertIn("centroid", data)
+        self.assertIn("latitude", data["centroid"])
+        self.assertIn("longitude", data["centroid"])
+        self.assertIn("sculpture_bounds_km", data)
+        self.assertGreater(data["sculpture_bounds_km"]["width_km"], 0.0)
+        self.assertEqual(len(data["facilities"]), 2)
+        for fac in data["facilities"]:
+            self.assertIn("offset_from_centroid_km", fac)
+            self.assertIn("x", fac["offset_from_centroid_km"])
+            self.assertIn("z", fac["offset_from_centroid_km"])
+            self.assertEqual(len(fac["slices"]), 8)
+
+        # 404 when none exist
+        res_404 = self.client.get("/api/facilities/volume-3d-multi?ids=NON_1,NON_2")
+        self.assertEqual(res_404.status_code, 404)
+
+        # 400 when empty
+        res_400 = self.client.get("/api/facilities/volume-3d-multi?ids=")
+        self.assertEqual(res_400.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

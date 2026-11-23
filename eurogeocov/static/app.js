@@ -2689,7 +2689,7 @@ function copyCliCommand() {
 }
 
 // ==========================================================================
-// 3D Airspace Coverage Volume WebGL Modal (Three.js)
+// 3D Airspace Coverage Volume & Multi-Site Sculpture (Three.js WebGL)
 // ==========================================================================
 
 let threeScene = null;
@@ -2702,11 +2702,94 @@ let threeGridGroup = null;
 let threeConeGroup = null;
 let threeActiveStationId = null;
 let threeCurrentVolumeData = null;
+let threeMultiData = null;
+let three3DMode = "single"; // "single" or "multi"
 let threeIsRotating = false;
 let threeConeVisible = true;
 let threeRingsVisible = true;
-let threeTheme = "cyan";
+let threeTheme = "multi";
 let threeExaggeration = 6;
+let threeStationGroups = {};
+let threeStationEnabled = {};
+
+const THREE_STATION_PALETTE = [
+  0x38bdf8, // Sky Cyan
+  0x10b981, // Emerald Green
+  0xf59e0b, // Amber Gold
+  0xec4899, // Pink / Magenta
+  0xa855f7, // Purple
+  0x06b6d4, // Neon Cyan
+  0xef4444, // Crimson Red
+  0x84cc16, // Lime
+  0x6366f1, // Indigo
+  0x14b8a6, // Teal
+  0xeab308, // Sun Gold
+  0xf97316  // Sunset Orange
+];
+
+function hexToRgb(hex) {
+  const r = (hex >> 16) & 255;
+  const g = (hex >> 8) & 255;
+  const b = hex & 255;
+  return `${r}, ${g}, ${b}`;
+}
+
+function getThemeColor(theme) {
+  if (theme === "radar") return 0x10b981;
+  if (theme === "amber") return 0xf59e0b;
+  if (theme === "wireframe") return 0x38bdf8;
+  return 0x00d2ff;
+}
+
+function disposeThreeObject(obj) {
+  if (!obj) return;
+  if (obj.geometry) obj.geometry.dispose();
+  if (obj.material) {
+    if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
+    else obj.material.dispose();
+  }
+  if (obj.children) {
+    while (obj.children.length > 0) {
+      const child = obj.children[0];
+      disposeThreeObject(child);
+      obj.remove(child);
+    }
+  }
+}
+
+function createThreeTextSprite(text, colorHex) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext("2d");
+
+  // Translucent dark rounded pill background
+  ctx.fillStyle = "rgba(5, 8, 17, 0.88)";
+  ctx.strokeStyle = colorHex || "#38bdf8";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(16, 20, 224, 88, 16);
+  } else {
+    ctx.rect(16, 20, 224, 88);
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  // White bold text
+  ctx.font = "bold 44px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 128, 64);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(36, 18, 1);
+  return sprite;
+}
 
 function initThreeScene() {
   const container = document.getElementById("threeVolumeContainer");
@@ -2723,10 +2806,10 @@ function initThreeScene() {
   // Scene
   threeScene = new THREE.Scene();
   threeScene.background = new THREE.Color(0x050811);
-  threeScene.fog = new THREE.FogExp2(0x050811, 0.0006);
+  threeScene.fog = new THREE.FogExp2(0x050811, 0.0004);
 
   // Camera
-  threeCamera = new THREE.PerspectiveCamera(45, width / height, 1, 8000);
+  threeCamera = new THREE.PerspectiveCamera(45, width / height, 1, 10000);
   threeCamera.position.set(240, 220, 320);
 
   // Renderer
@@ -2741,22 +2824,22 @@ function initThreeScene() {
     threeControls = new THREE.OrbitControls(threeCamera, threeRenderer.domElement);
     threeControls.enableDamping = true;
     threeControls.dampingFactor = 0.05;
-    threeControls.maxPolarAngle = Math.PI / 2 - 0.02; // Keep camera above ground
+    threeControls.maxPolarAngle = Math.PI / 2 - 0.01; // Stay above ground plane
     threeControls.minDistance = 20;
-    threeControls.maxDistance = 3500;
+    threeControls.maxDistance = 5000;
     threeControls.target.set(0, 40, 0);
   }
 
   // Lighting
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.65);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
   threeScene.add(ambientLight);
 
   const dirLight1 = new THREE.DirectionalLight(0xffffff, 0.85);
-  dirLight1.position.set(400, 600, 300);
+  dirLight1.position.set(500, 700, 400);
   threeScene.add(dirLight1);
 
   const dirLight2 = new THREE.DirectionalLight(0x38bdf8, 0.45);
-  dirLight2.position.set(-400, 300, -300);
+  dirLight2.position.set(-500, 400, -400);
   threeScene.add(dirLight2);
 
   // Master Groups
@@ -2794,8 +2877,8 @@ function onThreeResize() {
 function animateThree() {
   threeAnimFrameId = requestAnimationFrame(animateThree);
   if (threeIsRotating && threeVolumeGroup) {
-    threeVolumeGroup.rotation.y += 0.004;
-    if (threeConeGroup) threeConeGroup.rotation.y += 0.004;
+    threeVolumeGroup.rotation.y += 0.003;
+    if (threeConeGroup) threeConeGroup.rotation.y += 0.003;
   }
   if (threeControls) {
     threeControls.update();
@@ -2805,81 +2888,24 @@ function animateThree() {
   }
 }
 
-function buildThreeVolumeMesh(data) {
-  if (!data || !data.slices || data.slices.length < 2) return;
-  threeCurrentVolumeData = data;
+// ---------------------------------------------------------------------------
+// Facility Mesh Construction Core
+// ---------------------------------------------------------------------------
 
-  // Clear previous meshes
-  while (threeVolumeGroup.children.length > 0) {
-    const obj = threeVolumeGroup.children[0];
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) {
-      if (Array.isArray(obj.material)) obj.material.forEach(m => m.dispose());
-      else obj.material.dispose();
-    }
-    threeVolumeGroup.remove(obj);
-  }
-  while (threeConeGroup.children.length > 0) {
-    const obj = threeConeGroup.children[0];
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
-    threeConeGroup.remove(obj);
-  }
-  while (threeGridGroup.children.length > 0) {
-    const obj = threeGridGroup.children[0];
-    if (obj.geometry) obj.geometry.dispose();
-    if (obj.material) obj.material.dispose();
-    threeGridGroup.remove(obj);
-  }
+function buildFacilityVolumeMeshIntoGroup(fac, targetGroup, colorHex, exagg, theme) {
+  const slices = fac.slices;
+  if (!slices || slices.length < 2) return;
 
-  // Reset rotations
-  threeVolumeGroup.rotation.y = 0;
-  threeConeGroup.rotation.y = 0;
-
-  const exagg = parseFloat(document.getElementById("modal3DExaggeration")?.value || 6);
-  threeExaggeration = exagg;
-  const theme = document.getElementById("modal3DTheme")?.value || "cyan";
-  threeTheme = theme;
-
-  const slices = data.slices;
   const numSlices = slices.length;
   const numRadials = slices[0].outer_radii_km.length;
-  const azimuths = data.azimuths_deg || Array.from({ length: numRadials }, (_, i) => i * (360 / numRadials));
+  const azimuths = fac.azimuths_deg || Array.from({ length: numRadials }, (_, i) => i * (360 / numRadials));
 
-  // Determine max reach for ground grid sizing
-  let maxOuterReach = 100;
-  slices.forEach(s => {
-    s.outer_radii_km.forEach(r => { if (r > maxOuterReach) maxOuterReach = r; });
-  });
+  const isWireframeOnly = (theme === "wireframe");
+  const solidColor = colorHex;
+  const emissiveColor = colorHex;
+  const wireColor = colorHex;
+  const coneColor = 0xff0055;
 
-  // 1. Build Ground Compass, Rings & Grid
-  buildGroundEnvironment(maxOuterReach);
-
-  // 2. Build Antenna Mast Pin at origin
-  buildStationAntennaMast(data.tx_amsl_m || 0);
-
-  // Theme Colors
-  let solidColor = 0x00d2ff;
-  let emissiveColor = 0x0284c7;
-  let wireColor = 0x38bdf8;
-  let coneColor = 0xff0055;
-  let isWireframeOnly = (theme === "wireframe");
-
-  if (theme === "radar") {
-    solidColor = 0x10b981;
-    emissiveColor = 0x047857;
-    wireColor = 0x34d399;
-    coneColor = 0xf59e0b;
-  } else if (theme === "amber") {
-    solidColor = 0xf59e0b;
-    emissiveColor = 0xb45309;
-    wireColor = 0xfbbf24;
-    coneColor = 0xef4444;
-  }
-
-  // Vertices matrices
-  // outerVerts[slice_idx][radial_idx] = Vector3
-  // innerVerts[slice_idx][radial_idx] = Vector3
   const outerVerts = [];
   const innerVerts = [];
 
@@ -2899,17 +2925,14 @@ function buildThreeVolumeMesh(data) {
 
       const rOut = Math.max(rIn + 0.5, sl.outer_radii_km[i]);
 
-      // Outer point: X = East, Z = -North (Three.js standard coordinate orientation)
       outerRow.push(new THREE.Vector3(rOut * sinAz, y, -rOut * cosAz));
-
-      // Inner point (Zenith Cone of silence)
       innerRow.push(new THREE.Vector3(rIn * sinAz, y, -rIn * cosAz));
     }
     outerVerts.push(outerRow);
     innerVerts.push(innerRow);
   }
 
-  // --- A. Outer Jagged Shell Geometry ---
+  // --- A. Outer Jagged Shell ---
   const outerGeom = new THREE.BufferGeometry();
   const outerPositions = [];
 
@@ -2922,12 +2945,10 @@ function buildThreeVolumeMesh(data) {
       const p11 = outerVerts[s + 1][nextI];
       const p10 = outerVerts[s + 1][i];
 
-      // Tri 1: p00 -> p01 -> p11
       outerPositions.push(p00.x, p00.y, p00.z);
       outerPositions.push(p01.x, p01.y, p01.z);
       outerPositions.push(p11.x, p11.y, p11.z);
 
-      // Tri 2: p00 -> p11 -> p10
       outerPositions.push(p00.x, p00.y, p00.z);
       outerPositions.push(p11.x, p11.y, p11.z);
       outerPositions.push(p10.x, p10.y, p10.z);
@@ -2941,27 +2962,22 @@ function buildThreeVolumeMesh(data) {
     const outerMat = new THREE.MeshPhongMaterial({
       color: solidColor,
       emissive: emissiveColor,
-      emissiveIntensity: 0.25,
+      emissiveIntensity: 0.28,
       specular: 0xffffff,
-      shininess: 40,
+      shininess: 45,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.44,
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    const outerMesh = new THREE.Mesh(outerGeom, outerMat);
-    threeVolumeGroup.add(outerMesh);
+    targetGroup.add(new THREE.Mesh(outerGeom, outerMat));
   }
 
-  // Outer Wireframe overlay for structural crispness
-  const wireGeom = new THREE.WireframeGeometry(outerGeom);
-  const wireMat = new THREE.LineBasicMaterial({
-    color: wireColor,
-    transparent: true,
-    opacity: isWireframeOnly ? 0.85 : 0.25
-  });
-  const wireLines = new THREE.LineSegments(wireGeom, wireMat);
-  threeVolumeGroup.add(wireLines);
+  const wireLines = new THREE.LineSegments(
+    new THREE.WireframeGeometry(outerGeom),
+    new THREE.LineBasicMaterial({ color: wireColor, transparent: true, opacity: isWireframeOnly ? 0.85 : 0.25 })
+  );
+  targetGroup.add(wireLines);
 
   // --- B. Top Ceiling Cap Annulus ---
   const topCapGeom = new THREE.BufferGeometry();
@@ -2975,12 +2991,10 @@ function buildThreeVolumeMesh(data) {
     const out1 = outerVerts[topS][nextI];
     const in1 = innerVerts[topS][nextI];
 
-    // Tri 1: in0 -> out0 -> out1
     topPositions.push(in0.x, in0.y, in0.z);
     topPositions.push(out0.x, out0.y, out0.z);
     topPositions.push(out1.x, out1.y, out1.z);
 
-    // Tri 2: in0 -> out1 -> in1
     topPositions.push(in0.x, in0.y, in0.z);
     topPositions.push(out1.x, out1.y, out1.z);
     topPositions.push(in1.x, in1.y, in1.z);
@@ -2999,10 +3013,9 @@ function buildThreeVolumeMesh(data) {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    threeVolumeGroup.add(new THREE.Mesh(topCapGeom, topCapMat));
+    targetGroup.add(new THREE.Mesh(topCapGeom, topCapMat));
   }
-  const topWire = new THREE.LineSegments(new THREE.WireframeGeometry(topCapGeom), wireMat);
-  threeVolumeGroup.add(topWire);
+  targetGroup.add(new THREE.LineSegments(new THREE.WireframeGeometry(topCapGeom), wireLines.material));
 
   // --- C. Floor Cap Annulus ---
   const floorCapGeom = new THREE.BufferGeometry();
@@ -3033,7 +3046,7 @@ function buildThreeVolumeMesh(data) {
       side: THREE.DoubleSide,
       depthWrite: false
     });
-    threeVolumeGroup.add(new THREE.Mesh(floorCapGeom, floorCapMat));
+    targetGroup.add(new THREE.Mesh(floorCapGeom, floorCapMat));
   }
 
   // --- D. Inner Cone of Silence Funnel ---
@@ -3048,7 +3061,6 @@ function buildThreeVolumeMesh(data) {
       const c11 = innerVerts[s + 1][nextI];
       const c10 = innerVerts[s + 1][i];
 
-      // Inward normals
       conePositions.push(c00.x, c00.y, c00.z);
       conePositions.push(c11.x, c11.y, c11.z);
       conePositions.push(c01.x, c01.y, c01.z);
@@ -3062,6 +3074,8 @@ function buildThreeVolumeMesh(data) {
   coneGeom.setAttribute("position", new THREE.Float32BufferAttribute(conePositions, 3));
   coneGeom.computeVertexNormals();
 
+  const coneSubGroup = new THREE.Group();
+  coneSubGroup.name = "coneSubGroup";
   const coneMat = new THREE.MeshPhongMaterial({
     color: coneColor,
     emissive: coneColor,
@@ -3071,20 +3085,201 @@ function buildThreeVolumeMesh(data) {
     side: THREE.DoubleSide,
     depthWrite: false
   });
-  const coneMesh = new THREE.Mesh(coneGeom, coneMat);
-  threeConeGroup.add(coneMesh);
-
-  const coneWire = new THREE.LineSegments(
+  coneSubGroup.add(new THREE.Mesh(coneGeom, coneMat));
+  coneSubGroup.add(new THREE.LineSegments(
     new THREE.WireframeGeometry(coneGeom),
     new THREE.LineBasicMaterial({ color: coneColor, transparent: true, opacity: 0.5 })
-  );
-  threeConeGroup.add(coneWire);
+  ));
+  coneSubGroup.visible = threeConeVisible;
+  targetGroup.add(coneSubGroup);
+}
 
-  threeConeGroup.visible = threeConeVisible;
+function buildStationAntennaMastInGroup(targetGroup, txAmsl, beaconColorHex) {
+  const mastHeight = 8;
+  const mastGeom = new THREE.CylinderGeometry(0.8, 1.4, mastHeight, 12);
+  const mastMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+  const mastMesh = new THREE.Mesh(mastGeom, mastMat);
+  mastMesh.position.set(0, mastHeight / 2, 0);
+  targetGroup.add(mastMesh);
 
-  // Update UI Stats
+  // Glowing Colored Beacon Sphere
+  const beaconGeom = new THREE.SphereGeometry(1.6, 16, 16);
+  const beaconMat = new THREE.MeshBasicMaterial({ color: beaconColorHex || 0xff0044 });
+  const beaconMesh = new THREE.Mesh(beaconGeom, beaconMat);
+  beaconMesh.position.set(0, mastHeight + 0.8, 0);
+  targetGroup.add(beaconMesh);
+}
+
+// ---------------------------------------------------------------------------
+// Single Site Mesh Builder
+// ---------------------------------------------------------------------------
+
+function buildThreeVolumeMesh(data) {
+  if (!data || !data.slices || data.slices.length < 2) return;
+  threeCurrentVolumeData = data;
+
+  while (threeVolumeGroup.children.length > 0) {
+    const obj = threeVolumeGroup.children[0];
+    disposeThreeObject(obj);
+    threeVolumeGroup.remove(obj);
+  }
+  while (threeConeGroup.children.length > 0) {
+    const obj = threeConeGroup.children[0];
+    disposeThreeObject(obj);
+    threeConeGroup.remove(obj);
+  }
+  while (threeGridGroup.children.length > 0) {
+    const obj = threeGridGroup.children[0];
+    disposeThreeObject(obj);
+    threeGridGroup.remove(obj);
+  }
+
+  threeStationGroups = {};
+  threeVolumeGroup.rotation.y = 0;
+  threeConeGroup.rotation.y = 0;
+
+  const exagg = parseFloat(document.getElementById("modal3DExaggeration")?.value || 6);
+  threeExaggeration = exagg;
+  const theme = document.getElementById("modal3DTheme")?.value || "cyan";
+  threeTheme = theme;
+
+  const colorHex = (theme === "multi") ? 0x00d2ff : getThemeColor(theme);
+
+  let maxOuterReach = 100;
+  data.slices.forEach(s => {
+    s.outer_radii_km.forEach(r => { if (r > maxOuterReach) maxOuterReach = r; });
+  });
+
+  buildGroundEnvironment(maxOuterReach);
+  buildFacilityVolumeMeshIntoGroup(data, threeVolumeGroup, colorHex, exagg, theme);
+  buildStationAntennaMastInGroup(threeVolumeGroup, data.tx_amsl_m || 0, 0xff0044);
+
+  // Set default single camera view
+  threeCamera.position.set(240, 220, 320);
+  if (threeControls) {
+    threeControls.target.set(0, 40, 0);
+    threeControls.update();
+  }
+
+  const badgesBar = document.getElementById("modal3DStationBadges");
+  if (badgesBar) badgesBar.style.display = "none";
+
   updateModal3DStats(data, maxOuterReach);
 }
+
+// ---------------------------------------------------------------------------
+// Multi-Site Sculpture Builder
+// ---------------------------------------------------------------------------
+
+function buildThreeMultiSiteSculpture(data) {
+  if (!data || !data.facilities || data.facilities.length === 0) return;
+
+  while (threeVolumeGroup.children.length > 0) {
+    const obj = threeVolumeGroup.children[0];
+    disposeThreeObject(obj);
+    threeVolumeGroup.remove(obj);
+  }
+  while (threeConeGroup.children.length > 0) {
+    const obj = threeConeGroup.children[0];
+    disposeThreeObject(obj);
+    threeConeGroup.remove(obj);
+  }
+  while (threeGridGroup.children.length > 0) {
+    const obj = threeGridGroup.children[0];
+    disposeThreeObject(obj);
+    threeGridGroup.remove(obj);
+  }
+
+  threeStationGroups = {};
+  threeVolumeGroup.rotation.y = 0;
+  threeConeGroup.rotation.y = 0;
+
+  const exagg = parseFloat(document.getElementById("modal3DExaggeration")?.value || 6);
+  threeExaggeration = exagg;
+  const theme = document.getElementById("modal3DTheme")?.value || "multi";
+  threeTheme = theme;
+
+  const bounds = data.sculpture_bounds_km;
+  const maxSpan = Math.max(bounds.width_km, bounds.depth_km, 150);
+
+  // Build cluster ground grid & rings
+  buildMultiGroundEnvironment(bounds);
+
+  const badgesBar = document.getElementById("modal3DStationBadges");
+  if (badgesBar) {
+    badgesBar.style.display = "flex";
+    badgesBar.innerHTML = "";
+  }
+
+  // Position camera to frame entire sculpture
+  const camDist = Math.max(380, maxSpan * 0.95);
+  threeCamera.position.set(camDist * 0.65, camDist * 0.55, camDist * 0.85);
+  if (threeControls) {
+    threeControls.target.set(0, 30, 0);
+    threeControls.maxDistance = camDist * 4;
+    threeControls.update();
+  }
+
+  data.facilities.forEach((fac, idx) => {
+    const colorHex = (theme === "multi") 
+      ? THREE_STATION_PALETTE[idx % THREE_STATION_PALETTE.length]
+      : getThemeColor(theme);
+
+    const colorCss = "#" + colorHex.toString(16).padStart(6, "0");
+    const facId = fac.facility_id;
+    if (threeStationEnabled[facId] === undefined) {
+      threeStationEnabled[facId] = true;
+    }
+
+    const stGroup = new THREE.Group();
+    stGroup.name = facId;
+
+    // True spatial offset from sculpture centroid
+    const dx = fac.offset_from_centroid_km?.x || 0;
+    const dz = fac.offset_from_centroid_km?.z || 0;
+    stGroup.position.set(dx, 0, dz);
+
+    buildFacilityVolumeMeshIntoGroup(fac, stGroup, colorHex, exagg, theme);
+    buildStationAntennaMastInGroup(stGroup, fac.tx_amsl_m || 0, colorHex);
+
+    // Floating 3D billboard text sprite
+    const ceilingSlice = fac.slices[fac.slices.length - 1];
+    const spriteY = (ceilingSlice ? ceilingSlice.z_km * exagg : 50) + 16;
+    const sprite = createThreeTextSprite(fac.ident || facId.slice(0, 4), colorCss);
+    sprite.position.set(0, spriteY, 0);
+    stGroup.add(sprite);
+
+    stGroup.visible = threeStationEnabled[facId];
+    threeVolumeGroup.add(stGroup);
+    threeStationGroups[facId] = stGroup;
+
+    // Interactive station pill in toolbar
+    if (badgesBar) {
+      const pill = document.createElement("div");
+      pill.className = `sculpture-station-pill ${threeStationEnabled[facId] ? '' : 'disabled'}`;
+      pill.style.borderColor = colorCss;
+      pill.style.background = threeStationEnabled[facId] ? `rgba(${hexToRgb(colorHex)}, 0.2)` : 'rgba(22, 27, 34, 0.6)';
+      pill.style.color = colorCss;
+      pill.innerHTML = `
+        <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${colorCss};"></span>
+        <span><b>[${fac.ident || facId}]</b> ${fac.name || ''}</span>
+      `;
+      pill.onclick = () => {
+        threeStationEnabled[facId] = !threeStationEnabled[facId];
+        stGroup.visible = threeStationEnabled[facId];
+        pill.className = `sculpture-station-pill ${threeStationEnabled[facId] ? '' : 'disabled'}`;
+        pill.style.background = threeStationEnabled[facId] ? `rgba(${hexToRgb(colorHex)}, 0.2)` : 'rgba(22, 27, 34, 0.6)';
+      };
+      badgesBar.appendChild(pill);
+    }
+  });
+
+  updateModal3DMultiStats(data);
+}
+
+// ---------------------------------------------------------------------------
+// Ground Environments
+// ---------------------------------------------------------------------------
 
 function buildGroundEnvironment(maxRadiusKm) {
   const ringDistances = [50, 100, 200, 300, 400, 500, 600].filter(d => d <= maxRadiusKm * 1.25);
@@ -3104,7 +3299,6 @@ function buildGroundEnvironment(maxRadiusKm) {
 
   const maxR = ringDistances[ringDistances.length - 1];
 
-  // Concentric Rings
   ringDistances.forEach(r => {
     const ringGeom = new THREE.BufferGeometry();
     const pts = [];
@@ -3114,47 +3308,78 @@ function buildGroundEnvironment(maxRadiusKm) {
       pts.push(new THREE.Vector3(r * Math.sin(theta), 0, -r * Math.cos(theta)));
     }
     ringGeom.setFromPoints(pts);
-    const ringLine = new THREE.Line(ringGeom, ringMaterial);
-    threeGridGroup.add(ringLine);
+    threeGridGroup.add(new THREE.Line(ringGeom, ringMaterial));
   });
 
-  // Cardinal Cross (N, S, E, W)
   const crossGeom = new THREE.BufferGeometry();
   crossGeom.setFromPoints([
     new THREE.Vector3(0, 0, -maxR), new THREE.Vector3(0, 0, maxR),
     new THREE.Vector3(-maxR, 0, 0), new THREE.Vector3(maxR, 0, 0)
   ]);
-  const crossLines = new THREE.LineSegments(crossGeom, cardinalMaterial);
-  threeGridGroup.add(crossLines);
+  threeGridGroup.add(new THREE.LineSegments(crossGeom, cardinalMaterial));
 
-  // Compass North Arrow
   const northArrowGeom = new THREE.BufferGeometry();
   northArrowGeom.setFromPoints([
     new THREE.Vector3(-8, 0, -maxR + 15),
     new THREE.Vector3(0, 0, -maxR),
     new THREE.Vector3(8, 0, -maxR + 15)
   ]);
-  const northArrow = new THREE.Line(northArrowGeom, new THREE.LineBasicMaterial({ color: 0x38bdf8 }));
-  threeGridGroup.add(northArrow);
+  threeGridGroup.add(new THREE.Line(northArrowGeom, new THREE.LineBasicMaterial({ color: 0x38bdf8 })));
 
   threeGridGroup.visible = threeRingsVisible;
 }
 
-function buildStationAntennaMast(txAmsl) {
-  const mastHeight = 8;
-  const mastGeom = new THREE.CylinderGeometry(0.8, 1.4, mastHeight, 12);
-  const mastMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
-  const mastMesh = new THREE.Mesh(mastGeom, mastMat);
-  mastMesh.position.set(0, mastHeight / 2, 0);
-  threeVolumeGroup.add(mastMesh);
+function buildMultiGroundEnvironment(bounds) {
+  const maxR = Math.max(bounds.width_km, bounds.depth_km, 300) * 0.75;
+  const ringDistances = [100, 200, 300, 500, 800, 1200].filter(d => d <= maxR * 1.3);
+  if (ringDistances.length === 0) ringDistances.push(100, 200);
 
-  // Blinking / Glowing Red Beacon Sphere
-  const beaconGeom = new THREE.SphereGeometry(1.6, 16, 16);
-  const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff0044 });
-  const beaconMesh = new THREE.Mesh(beaconGeom, beaconMat);
-  beaconMesh.position.set(0, mastHeight + 0.8, 0);
-  threeVolumeGroup.add(beaconMesh);
+  const ringMaterial = new THREE.LineBasicMaterial({
+    color: 0x334155,
+    transparent: true,
+    opacity: 0.5
+  });
+
+  const cardinalMaterial = new THREE.LineBasicMaterial({
+    color: 0x475569,
+    transparent: true,
+    opacity: 0.75
+  });
+
+  ringDistances.forEach(r => {
+    const ringGeom = new THREE.BufferGeometry();
+    const pts = [];
+    const segs = 96;
+    for (let i = 0; i <= segs; i++) {
+      const theta = (i / segs) * Math.PI * 2;
+      pts.push(new THREE.Vector3(r * Math.sin(theta), 0, -r * Math.cos(theta)));
+    }
+    ringGeom.setFromPoints(pts);
+    threeGridGroup.add(new THREE.Line(ringGeom, ringMaterial));
+  });
+
+  const topR = ringDistances[ringDistances.length - 1];
+  const crossGeom = new THREE.BufferGeometry();
+  crossGeom.setFromPoints([
+    new THREE.Vector3(0, 0, -topR), new THREE.Vector3(0, 0, topR),
+    new THREE.Vector3(-topR, 0, 0), new THREE.Vector3(topR, 0, 0)
+  ]);
+  threeGridGroup.add(new THREE.LineSegments(crossGeom, cardinalMaterial));
+
+  const northArrowGeom = new THREE.BufferGeometry();
+  northArrowGeom.setFromPoints([
+    new THREE.Vector3(-12, 0, -topR + 25),
+    new THREE.Vector3(0, 0, -topR),
+    new THREE.Vector3(12, 0, -topR + 25)
+  ]);
+  threeGridGroup.add(new THREE.Line(northArrowGeom, new THREE.LineBasicMaterial({ color: 0x38bdf8 })));
+
+  threeGridGroup.visible = threeRingsVisible;
 }
+
+// ---------------------------------------------------------------------------
+// Open / Close & Mode Switching Controllers
+// ---------------------------------------------------------------------------
 
 async function openCoverage3DModal(stationId) {
   if (!stationId) {
@@ -3167,15 +3392,82 @@ async function openCoverage3DModal(stationId) {
   }
 
   threeActiveStationId = stationId;
+  three3DMode = "single";
   const modal = document.getElementById("modalCoverage3D");
   if (!modal) return;
   modal.style.display = "flex";
 
+  updateModeButtonsUI("single");
   initThreeScene();
   setTimeout(() => onThreeResize(), 50);
 
   const ceilingFt = document.getElementById("modal3DCeilingSelect")?.value || 60000;
   await loadCoverage3DData(stationId, ceilingFt);
+}
+
+async function openCoverage3DMultiSiteModal() {
+  const stations = lastCoverageData?.stations || [];
+  if (stations.length === 0) {
+    alert("Please select and load stations on the map first using '⚡ Load & Merge Precalculated Coverage'.");
+    return;
+  }
+
+  const modal = document.getElementById("modalCoverage3D");
+  if (!modal) return;
+  modal.style.display = "flex";
+
+  three3DMode = "multi";
+  updateModeButtonsUI("multi");
+  initThreeScene();
+  setTimeout(() => onThreeResize(), 50);
+
+  await loadCoverage3DMultiData();
+}
+
+function updateModeButtonsUI(mode) {
+  const singleBtn = document.getElementById("modal3DModeSingleBtn");
+  const multiBtn = document.getElementById("modal3DModeMultiBtn");
+  if (mode === "single") {
+    if (singleBtn) {
+      singleBtn.style.background = "rgba(88, 166, 255, 0.25)";
+      singleBtn.style.borderColor = "var(--accent-blue)";
+      singleBtn.style.color = "#fff";
+    }
+    if (multiBtn) {
+      multiBtn.style.background = "";
+      multiBtn.style.borderColor = "";
+      multiBtn.style.color = "";
+    }
+  } else {
+    if (multiBtn) {
+      multiBtn.style.background = "rgba(88, 166, 255, 0.25)";
+      multiBtn.style.borderColor = "var(--accent-blue)";
+      multiBtn.style.color = "#fff";
+    }
+    if (singleBtn) {
+      singleBtn.style.background = "";
+      singleBtn.style.borderColor = "";
+      singleBtn.style.color = "";
+    }
+  }
+}
+
+async function switch3DMode(mode) {
+  three3DMode = mode;
+  updateModeButtonsUI(mode);
+
+  if (mode === "single") {
+    const badgesBar = document.getElementById("modal3DStationBadges");
+    if (badgesBar) badgesBar.style.display = "none";
+
+    const ceilingFt = document.getElementById("modal3DCeilingSelect")?.value || 60000;
+    const stationId = threeActiveStationId || (lastCoverageData?.stations?.length > 0 ? lastCoverageData.stations[0].station_id : null);
+    if (stationId) {
+      await loadCoverage3DData(stationId, ceilingFt);
+    }
+  } else {
+    await loadCoverage3DMultiData();
+  }
 }
 
 function closeCoverage3DModal() {
@@ -3185,6 +3477,8 @@ function closeCoverage3DModal() {
 
 async function loadCoverage3DData(stationId, ceilingFt) {
   const spinner = document.getElementById("threeVolumeSpinner");
+  const spinnerText = document.getElementById("threeVolumeSpinnerText");
+  if (spinnerText) spinnerText.textContent = "Generating 3D Volumetric Mesh...";
   if (spinner) spinner.style.display = "flex";
 
   try {
@@ -3202,28 +3496,70 @@ async function loadCoverage3DData(stationId, ceilingFt) {
   }
 }
 
+async function loadCoverage3DMultiData() {
+  const spinner = document.getElementById("threeVolumeSpinner");
+  const spinnerText = document.getElementById("threeVolumeSpinnerText");
+  if (spinnerText) spinnerText.textContent = "Sculpting Multi-Site 3D Airspace Mesh...";
+  if (spinner) spinner.style.display = "flex";
+
+  try {
+    const stations = lastCoverageData?.stations || [];
+    let ids = stations.map(s => s.station_id).join(",");
+    if (!ids && threeActiveStationId) ids = threeActiveStationId;
+    if (!ids) {
+      alert("No active stations loaded on the map.");
+      return;
+    }
+
+    const ceilingFt = document.getElementById("modal3DCeilingSelect")?.value || 60000;
+    const res = await fetch(`/api/facilities/volume-3d-multi?ids=${encodeURIComponent(ids)}&max_flight_level_ft=${ceilingFt}&num_slices=12`);
+    if (!res.ok) {
+      throw new Error(`Server returned HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    threeMultiData = data;
+    buildThreeMultiSiteSculpture(data);
+  } catch (err) {
+    console.error("Failed to load multi-site 3D sculpture:", err);
+    alert(`Could not generate multi-site 3D sculpture: ${err.message}`);
+  } finally {
+    if (spinner) spinner.style.display = "none";
+  }
+}
+
 async function updateCoverage3DCeiling() {
   const ceilingFt = document.getElementById("modal3DCeilingSelect")?.value || 60000;
-  if (threeActiveStationId) {
-    await loadCoverage3DData(threeActiveStationId, ceilingFt);
+  if (three3DMode === "single") {
+    if (threeActiveStationId) await loadCoverage3DData(threeActiveStationId, ceilingFt);
+  } else {
+    await loadCoverage3DMultiData();
   }
 }
 
 function updateCoverage3DMesh() {
-  if (threeCurrentVolumeData) {
-    buildThreeVolumeMesh(threeCurrentVolumeData);
+  if (three3DMode === "single") {
+    if (threeCurrentVolumeData) buildThreeVolumeMesh(threeCurrentVolumeData);
+  } else {
+    if (threeMultiData) buildThreeMultiSiteSculpture(threeMultiData);
   }
 }
 
 function updateCoverage3DTheme() {
-  if (threeCurrentVolumeData) {
-    buildThreeVolumeMesh(threeCurrentVolumeData);
+  if (three3DMode === "single") {
+    if (threeCurrentVolumeData) buildThreeVolumeMesh(threeCurrentVolumeData);
+  } else {
+    if (threeMultiData) buildThreeMultiSiteSculpture(threeMultiData);
   }
 }
 
 function toggleCoverage3DCone() {
   threeConeVisible = document.getElementById("modal3DConeToggle")?.checked ?? true;
   if (threeConeGroup) threeConeGroup.visible = threeConeVisible;
+
+  // Also toggle inner cone sub-groups across all stations in multi-site mode
+  threeVolumeGroup.traverse(child => {
+    if (child.name === "coneSubGroup") child.visible = threeConeVisible;
+  });
 }
 
 function toggleCoverage3DRings() {
@@ -3241,10 +3577,21 @@ function toggleCoverage3DAutoRotate() {
 }
 
 function resetCoverage3DCamera() {
-  if (threeCamera && threeControls) {
-    threeCamera.position.set(240, 220, 320);
-    threeControls.target.set(0, 40, 0);
-    threeControls.update();
+  if (three3DMode === "single") {
+    if (threeCamera && threeControls) {
+      threeCamera.position.set(240, 220, 320);
+      threeControls.target.set(0, 40, 0);
+      threeControls.update();
+    }
+  } else {
+    if (threeMultiData && threeCamera && threeControls) {
+      const bounds = threeMultiData.sculpture_bounds_km;
+      const maxSpan = Math.max(bounds.width_km, bounds.depth_km, 150);
+      const camDist = Math.max(380, maxSpan * 0.95);
+      threeCamera.position.set(camDist * 0.65, camDist * 0.55, camDist * 0.85);
+      threeControls.target.set(0, 30, 0);
+      threeControls.update();
+    }
   }
   if (threeVolumeGroup) threeVolumeGroup.rotation.y = 0;
   if (threeConeGroup) threeConeGroup.rotation.y = 0;
@@ -3256,23 +3603,64 @@ function updateModal3DStats(data, maxOuterReach) {
 
   const sub = document.getElementById("modal3DSubtitle");
   if (sub) {
-    sub.innerHTML = `${data.name || ''} (${data.type || data.category}) &middot; ${data.country_name || data.country || 'EU'} &middot; Horizon LoS &amp; Zenith Radiation Cone`;
+    sub.innerHTML = `${data.name || ''} (${data.type || data.category}) &middot; ${data.country_name || data.country || 'EU'} &middot; Horizon LoS &amp; Zenith Silence Cone`;
   }
 
   const vol = document.getElementById("modal3DStatVolume");
   if (vol) vol.textContent = `${(data.total_volume_km3 || 0).toLocaleString()} km³`;
 
   const brk = document.getElementById("modal3DStatBracket");
+  const brkLabel = document.getElementById("modal3DStatBracketLabel");
+  if (brkLabel) brkLabel.textContent = "Airspace Bracket";
   if (brk) brk.textContent = `FL${String(Math.round(data.floor_flight_level_ft / 100)).padStart(3, '0')} - FL${Math.round(data.ceiling_flight_level_ft / 100)}`;
 
   const reach = document.getElementById("modal3DStatReach");
+  const reachLabel = document.getElementById("modal3DStatReachLabel");
+  if (reachLabel) reachLabel.textContent = "Max Reach @ Ceiling";
   if (reach) reach.textContent = `${Math.round(maxOuterReach)} km`;
 
   const cone = document.getElementById("modal3DStatCone");
+  const coneLabel = document.getElementById("modal3DStatConeLabel");
+  if (coneLabel) coneLabel.textContent = "Silence Cone Radius";
   const ceilingSlice = data.slices[data.slices.length - 1];
   if (cone) cone.textContent = `${ceilingSlice ? ceilingSlice.inner_radius_km : '--'} km`;
 
   const tx = document.getElementById("modal3DStatTx");
+  const txLabel = document.getElementById("modal3DStatTxLabel");
+  if (txLabel) txLabel.textContent = "Station AMSL / Mast";
   if (tx) tx.textContent = `${Math.round(data.tx_amsl_m)}m AMSL (+${Math.round(data.mast_height_m || 25)}m mast)`;
+}
+
+function updateModal3DMultiStats(data) {
+  const title = document.getElementById("modal3DTitle");
+  if (title) title.innerHTML = `🌐 Multi-Site Airspace Sculpture (${data.stations_count} Facilities)`;
+
+  const sub = document.getElementById("modal3DSubtitle");
+  if (sub) {
+    sub.innerHTML = `Centroid: ${data.centroid.latitude.toFixed(2)}°N, ${data.centroid.longitude.toFixed(2)}°E &middot; Spatial Span: ${Math.round(data.sculpture_bounds_km.width_km)} km &times; ${Math.round(data.sculpture_bounds_km.depth_km)} km &middot; Horizon Overlap`;
+  }
+
+  const vol = document.getElementById("modal3DStatVolume");
+  if (vol) vol.textContent = `${(data.total_volume_km3 || 0).toLocaleString()} km³`;
+
+  const brk = document.getElementById("modal3DStatBracket");
+  const brkLabel = document.getElementById("modal3DStatBracketLabel");
+  if (brkLabel) brkLabel.textContent = "Active Stations";
+  if (brk) brk.textContent = `${data.stations_count} Sites`;
+
+  const reach = document.getElementById("modal3DStatReach");
+  const reachLabel = document.getElementById("modal3DStatReachLabel");
+  if (reachLabel) reachLabel.textContent = "Cluster Width";
+  if (reach) reach.textContent = `${Math.round(data.sculpture_bounds_km.width_km)} km`;
+
+  const cone = document.getElementById("modal3DStatCone");
+  const coneLabel = document.getElementById("modal3DStatConeLabel");
+  if (coneLabel) coneLabel.textContent = "Cluster Depth";
+  if (cone) cone.textContent = `${Math.round(data.sculpture_bounds_km.depth_km)} km`;
+
+  const tx = document.getElementById("modal3DStatTx");
+  const txLabel = document.getElementById("modal3DStatTxLabel");
+  if (txLabel) txLabel.textContent = "Centroid WGS84";
+  if (tx) tx.textContent = `${data.centroid.latitude.toFixed(2)}°N, ${data.centroid.longitude.toFixed(2)}°E`;
 }
 
