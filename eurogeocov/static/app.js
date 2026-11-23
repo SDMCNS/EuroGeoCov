@@ -31,6 +31,10 @@ let rayRotationTimer = null;
 let activeRayLayer = null;
 let rayProfileCache = {};
 
+// Dataset Builder & CLI Export State
+let stagedDataset = [];
+let datasetBuilderLayerGroup = null;
+
 // Initialize Map & Application
 document.addEventListener("DOMContentLoaded", () => {
   initMap();
@@ -80,6 +84,7 @@ function initMap() {
   L.control.layers(baseMaps, null, { position: "topright" }).addTo(map);
 
   conicalLayerGroup = L.layerGroup().addTo(map);
+  datasetBuilderLayerGroup = L.layerGroup().addTo(map);
 
   // Custom Icons
   const txIcon = L.divIcon({
@@ -136,6 +141,25 @@ function initMap() {
       document.getElementById("cubeLon").value = e.latlng.lng.toFixed(4);
       pickingMode = null;
       evaluateAirspaceCube();
+    } else if (pickingMode === "builder") {
+      document.getElementById("builderLat").value = e.latlng.lat.toFixed(4);
+      document.getElementById("builderLon").value = e.latlng.lng.toFixed(4);
+      fetch(`/api/dem/elevation?lat=${e.latlng.lat}&lon=${e.latlng.lng}`)
+        .then(r => r.json())
+        .then(d => {
+          if (d && d.elevation_m !== undefined) {
+            const ft = Math.round(d.elevation_m * 3.28084);
+            const elevInput = document.getElementById("builderSiteElevFt");
+            if (elevInput) elevInput.value = ft;
+          }
+        }).catch(() => {});
+      pickingMode = null;
+      const pickBtn = document.getElementById("btnPickBuilderMap");
+      if (pickBtn) {
+        pickBtn.textContent = "Click on Map";
+        pickBtn.classList.remove("active");
+      }
+      map.getContainer().style.cursor = "";
     } else if (pickingMode === "conical_probe" || (document.getElementById("tab-conical") && document.getElementById("tab-conical").style.display !== "none")) {
       inspectAirspaceColumnAt(e.latlng.lat, e.latlng.lng);
       pickingMode = null;
@@ -162,6 +186,15 @@ function switchTab(tabId) {
   if (tabId === "conical") {
     if (sidePanel) sidePanel.style.display = "flex";
     runMultiStationCoverage();
+  } else if (tabId === "dataset-builder") {
+    stopRayRotation();
+    if (activeRayLayer) {
+      map.removeLayer(activeRayLayer);
+      activeRayLayer = null;
+    }
+    if (sidePanel) sidePanel.style.display = "none";
+    if (conicalLayerGroup) conicalLayerGroup.clearLayers();
+    renderDatasetBuilderMarkers();
   } else {
     // Stop any active ray rotation and clear active ray on map
     stopRayRotation();
@@ -810,6 +843,7 @@ async function loadFacilities() {
     updateCountryBulkCard();
     renderFacilityList();
     updateSelectedChips();
+    populateBuilderEcacSelect();
 
     // Trigger initial multi-station coverage
     runMultiStationCoverage();
@@ -1052,6 +1086,11 @@ function updateSelectedChips() {
   const selectedList = allFacilities.filter(f => selectedFacilityIds.has(f.id));
   if (countBadge) countBadge.textContent = `${selectedList.length} Selected`;
 
+  const bCount = document.getElementById("btnStageCoverageCount");
+  if (bCount) bCount.textContent = selectedFacilityIds.size;
+  const impCount = document.getElementById("importCheckedCount");
+  if (impCount) impCount.textContent = selectedFacilityIds.size;
+
   if (selectedList.length === 0) {
     box.innerHTML = `<span style="font-size:11px; color:var(--text-muted); font-style:italic;">No facility selected yet. Check boxes above or click presets.</span>`;
     return;
@@ -1259,6 +1298,11 @@ function renderMultiStationCoverage(data) {
         <b>Flight Level:</b> FL${Math.round(flFt / 100)} (${flFt} ft AMSL)<br>
         <b>Effective Area:</b> ${(station.metrics?.coverage_area_sq_km || 0).toLocaleString()} km&sup2;<br>
         <b>Terrain Cut Radials:</b> ${station.metrics?.cut_radials || 0} / ${station.metrics?.total_radials || 0} (${station.metrics?.cut_percentage || 0}%)
+        <div style="margin-top:8px; border-top:1px solid #30363d; padding-top:6px;">
+          <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px; width:100%; cursor:pointer;" onclick="addFacilityToDatasetBuilder('${station.station_id}')">
+            ➕ Add to Dataset Builder
+          </button>
+        </div>
       </div>
     `);
 
@@ -1937,3 +1981,555 @@ function updateProfileStatsCards(data) {
   const statObst = document.getElementById("statObstacle");
   if (statObst) statObst.textContent = data.obstacle ? `${data.obstacle.curved_terrain_m}m @ ${(data.obstacle.distance_m / 1000).toFixed(1)}km` : "None";
 }
+
+/* ==========================================================================
+   Dataset Builder & CLI Template Exporter
+   ========================================================================== */
+
+function populateBuilderEcacSelect() {
+  const sel = document.getElementById("builderEcacSelect");
+  if (!sel || !allFacilities || allFacilities.length === 0) return;
+
+  const sorted = [...allFacilities].sort((a, b) => (a.ident || a.name).localeCompare(b.ident || b.name));
+  let html = `<option value="">-- Choose ECAC VOR/DME or Radar to add (${sorted.length} available) --</option>`;
+  sorted.forEach(f => {
+    const cat = f.category === "RADAR" ? "RADAR" : "VOR/DME";
+    html += `<option value="${f.id}">[${cat}] ${f.ident} - ${f.name} (${f.country || 'EU'}, ${f.type}, ${f.range_nm}NM)</option>`;
+  });
+  sel.innerHTML = html;
+}
+
+function onBuilderCategoryChange() {
+  const cat = document.querySelector('input[name="builderCategory"]:checked')?.value || "RADAR";
+  const radFields = document.getElementById("builderRadarFields");
+  const navFields = document.getElementById("builderNavaidFields");
+  if (cat === "RADAR") {
+    if (radFields) radFields.style.display = "block";
+    if (navFields) navFields.style.display = "none";
+  } else {
+    if (radFields) radFields.style.display = "none";
+    if (navFields) navFields.style.display = "block";
+  }
+}
+
+function onBuilderNavaidTypeChange() {
+  const type = document.getElementById("builderNavaidType")?.value || "VOR-DME";
+  const catSelect = document.getElementById("builderServiceCat");
+  if (type === "DME" || type.includes("TMA")) {
+    if (catSelect) catSelect.value = "TMA";
+    onBuilderServiceCatChange();
+  }
+}
+
+function onBuilderServiceCatChange() {
+  const sCat = document.getElementById("builderServiceCat")?.value || "ENROUTE";
+  const pwr = document.getElementById("builderPower");
+  const rng = document.getElementById("builderNavaidRange");
+  if (sCat === "TMA") {
+    if (pwr) pwr.value = "LOW";
+    if (rng) rng.value = 40;
+  } else {
+    if (pwr) pwr.value = "HIGH";
+    if (rng) rng.value = 130;
+  }
+}
+
+function enableBuilderMapPick() {
+  const btn = document.getElementById("btnPickBuilderMap");
+  if (pickingMode === "builder") {
+    pickingMode = null;
+    if (btn) {
+      btn.textContent = "Click on Map";
+      btn.classList.remove("active");
+    }
+    map.getContainer().style.cursor = "";
+  } else {
+    pickingMode = "builder";
+    if (btn) {
+      btn.textContent = "Click map point... (Cancel)";
+      btn.classList.add("active");
+    }
+    map.getContainer().style.cursor = "crosshair";
+  }
+}
+
+function addCustomSiteToBuilder() {
+  const cat = document.querySelector('input[name="builderCategory"]:checked')?.value || "RADAR";
+  const ident = (document.getElementById("builderIdent")?.value || "").trim().toUpperCase();
+  const name = (document.getElementById("builderName")?.value || "").trim() || `${ident} Station`;
+  const country = (document.getElementById("builderCountry")?.value || "EU").trim().toUpperCase().slice(0, 2);
+  const lat = parseFloat(document.getElementById("builderLat")?.value);
+  const lon = parseFloat(document.getElementById("builderLon")?.value);
+
+  if (!ident) {
+    alert("Please enter a facility Ident / Code (e.g. RAD_01 or GVA).");
+    return;
+  }
+  if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    alert("Please enter valid latitude (-90 to 90) and longitude (-180 to 180).");
+    return;
+  }
+
+  // Check for duplicates
+  if (stagedDataset.some(s => s.ident.toUpperCase() === ident)) {
+    if (!confirm(`A station with ident '${ident}' already exists in your staged dataset. Add another?`)) {
+      return;
+    }
+  }
+
+  let site = null;
+  if (cat === "RADAR") {
+    const rType = document.getElementById("builderRadarType")?.value || "MODE-S";
+    const mastH = parseFloat(document.getElementById("builderMastHeight")?.value) || 25.0;
+    const rng = parseFloat(document.getElementById("builderRadarRange")?.value) || 200.0;
+    const modeS = document.getElementById("builderModeS")?.value === "true";
+    const minEl = parseFloat(document.getElementById("builderRadarMinElev")?.value) || 0.5;
+    const maxEl = parseFloat(document.getElementById("builderRadarMaxElev")?.value) || 45.0;
+    const azS = parseFloat(document.getElementById("builderRadarAzStart")?.value) || 0.0;
+    const azE = parseFloat(document.getElementById("builderRadarAzEnd")?.value) || 360.0;
+
+    site = {
+      id: `custom_rad_${ident}_${Date.now()}`,
+      ident: ident,
+      name: name,
+      category: "RADAR",
+      type: rType,
+      country: country,
+      latitude: lat,
+      longitude: lon,
+      mast_height_m: mastH,
+      range_nm: rng,
+      range_km: Math.round(rng * 1.852 * 10) / 10,
+      mode_s: modeS,
+      azimuth_start_deg: azS,
+      azimuth_end_deg: azE,
+      elevation_min_deg: minEl,
+      elevation_max_deg: maxEl
+    };
+  } else {
+    // NAVAID
+    const nType = document.getElementById("builderNavaidType")?.value || "VOR-DME";
+    const sCat = document.getElementById("builderServiceCat")?.value || "ENROUTE";
+    const pwr = document.getElementById("builderPower")?.value || (sCat === "TMA" ? "LOW" : "HIGH");
+    const rng = parseFloat(document.getElementById("builderNavaidRange")?.value) || (sCat === "TMA" ? 40.0 : 130.0);
+    const elevFt = parseInt(document.getElementById("builderSiteElevFt")?.value) || 1000;
+    const freqKhz = parseInt(document.getElementById("builderFreqKhz")?.value) || 115000;
+    const dmeCh = (document.getElementById("builderDmeChan")?.value || "95X").trim().toUpperCase();
+
+    site = {
+      id: `custom_nav_${ident}_${Date.now()}`,
+      ident: ident,
+      name: name,
+      category: "NAVAID",
+      type: nType,
+      service_category: sCat,
+      power: pwr,
+      country: country,
+      latitude: lat,
+      longitude: lon,
+      elevation_ft: elevFt,
+      ground_elev_m: Math.round(elevFt * 0.3048),
+      range_nm: rng,
+      range_km: Math.round(rng * 1.852 * 10) / 10,
+      frequency_khz: freqKhz,
+      dme_channel: dmeCh,
+      elevation_max_deg: 60.0
+    };
+  }
+
+  stagedDataset.push(site);
+  updateDatasetBuilderUI();
+
+  // Reset ident for convenience
+  const nextNum = stagedDataset.length + 1;
+  const identInput = document.getElementById("builderIdent");
+  if (identInput) identInput.value = cat === "RADAR" ? `RAD_${nextNum < 10 ? '0' : ''}${nextNum}` : `NAV_${nextNum < 10 ? '0' : ''}${nextNum}`;
+}
+
+function addEcacStationToBuilder() {
+  const sel = document.getElementById("builderEcacSelect");
+  if (!sel || !sel.value) {
+    alert("Please choose an ECAC station from the dropdown.");
+    return;
+  }
+  addFacilityToDatasetBuilder(sel.value);
+}
+
+function addFacilityToDatasetBuilder(stationId) {
+  let fac = allFacilities.find(f => f.id === stationId);
+  if (!fac && conicalData && conicalData.stations) {
+    const cSt = conicalData.stations.find(s => s.station_id === stationId);
+    if (cSt) {
+      fac = {
+        id: cSt.station_id,
+        ident: cSt.station_ident,
+        name: cSt.station_name,
+        category: cSt.category,
+        type: cSt.station_type,
+        service_category: cSt.service_category,
+        country: cSt.country,
+        country_name: cSt.country_name,
+        latitude: cSt.tx_coords[0],
+        longitude: cSt.tx_coords[1],
+        range_nm: cSt.range_nm,
+        range_km: cSt.range_km,
+        mast_height_m: 25.0,
+        ground_elev_m: cSt.ground_elev_m,
+        dem_elev_m: cSt.ground_elev_m
+      };
+    }
+  }
+
+  if (!fac) {
+    alert(`Facility ${stationId} details not found.`);
+    return;
+  }
+
+  const ident = (fac.ident || fac.name.slice(0, 5)).toUpperCase();
+  if (stagedDataset.some(s => (s.id && s.id === fac.id) || s.ident === ident)) {
+    alert(`Station ${ident} is already in the staged dataset.`);
+    return;
+  }
+
+  const isRadar = (fac.category === "RADAR" || (fac.type && fac.type.includes("RADAR")));
+  const site = {
+    id: fac.id || `staged_${Date.now()}`,
+    ident: ident,
+    name: fac.name || "Station",
+    category: isRadar ? "RADAR" : "NAVAID",
+    type: fac.type || (isRadar ? "MODE-S" : "VOR-DME"),
+    service_category: fac.service_category || (fac.type && fac.type.includes("TMA") ? "TMA" : "ENROUTE"),
+    power: fac.power || (fac.service_category === "TMA" ? "LOW" : "HIGH"),
+    country: (fac.country || "EU").toUpperCase().slice(0, 2),
+    latitude: Number(fac.latitude || 0),
+    longitude: Number(fac.longitude || 0),
+    mast_height_m: fac.mast_height_m || 25.0,
+    ground_elev_m: fac.ground_elev_m || fac.dem_elev_m || 0.0,
+    elevation_ft: fac.elevation_ft || Math.round((fac.ground_elev_m || fac.dem_elev_m || 0.0) * 3.28084),
+    range_nm: fac.range_nm || (isRadar ? 200.0 : 130.0),
+    range_km: fac.range_km || (isRadar ? 370.4 : 240.8),
+    mode_s: fac.mode_s !== undefined ? fac.mode_s : true,
+    frequency_khz: fac.frequency_khz || 115000,
+    dme_channel: fac.dme_channel || "95X",
+    azimuth_start_deg: fac.azimuth_limits ? fac.azimuth_limits[0] : 0.0,
+    azimuth_end_deg: fac.azimuth_limits ? fac.azimuth_limits[1] : 360.0,
+    elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : 0.5,
+    elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 45.0 : 60.0)
+  };
+
+  stagedDataset.push(site);
+  updateDatasetBuilderUI();
+
+  // Subtle alert / feedback
+  const toast = document.createElement("div");
+  toast.style.cssText = "position:fixed; bottom:20px; right:20px; background:#1f6feb; color:#fff; padding:10px 16px; border-radius:6px; font-size:12px; font-weight:600; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.4);";
+  toast.textContent = `✓ Staged ${site.ident} (${site.name}) — Total ${stagedDataset.length} site(s)`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+
+function importCheckedCoverageStationsToBuilder() {
+  if (selectedFacilityIds.size === 0) {
+    alert("No facilities are currently checked in the Conical Coverage view.");
+    return;
+  }
+
+  let addedCount = 0;
+  selectedFacilityIds.forEach(id => {
+    const fac = allFacilities.find(f => f.id === id);
+    if (!fac) return;
+    const ident = (fac.ident || fac.name.slice(0, 5)).toUpperCase();
+    if (stagedDataset.some(s => s.id === fac.id || s.ident === ident)) return;
+
+    const isRadar = (fac.category === "RADAR" || (fac.type && fac.type.includes("RADAR")));
+    const site = {
+      id: fac.id,
+      ident: ident,
+      name: fac.name || "Station",
+      category: isRadar ? "RADAR" : "NAVAID",
+      type: fac.type || (isRadar ? "MODE-S" : "VOR-DME"),
+      service_category: fac.service_category || (fac.type && fac.type.includes("TMA") ? "TMA" : "ENROUTE"),
+      power: fac.power || (fac.service_category === "TMA" ? "LOW" : "HIGH"),
+      country: (fac.country || "EU").toUpperCase().slice(0, 2),
+      latitude: Number(fac.latitude || 0),
+      longitude: Number(fac.longitude || 0),
+      mast_height_m: fac.mast_height_m || 25.0,
+      ground_elev_m: fac.ground_elev_m || fac.dem_elev_m || 0.0,
+      elevation_ft: fac.elevation_ft || Math.round((fac.ground_elev_m || fac.dem_elev_m || 0.0) * 3.28084),
+      range_nm: fac.range_nm || (isRadar ? 200.0 : 130.0),
+      range_km: fac.range_km || (isRadar ? 370.4 : 240.8),
+      mode_s: fac.mode_s !== undefined ? fac.mode_s : true,
+      frequency_khz: fac.frequency_khz || 115000,
+      dme_channel: fac.dme_channel || "95X",
+      azimuth_start_deg: fac.azimuth_limits ? fac.azimuth_limits[0] : 0.0,
+      azimuth_end_deg: fac.azimuth_limits ? fac.azimuth_limits[1] : 360.0,
+      elevation_min_deg: fac.elevation_limits ? fac.elevation_limits[0] : 0.5,
+      elevation_max_deg: fac.elevation_limits ? fac.elevation_limits[1] : (isRadar ? 45.0 : 60.0)
+    };
+    stagedDataset.push(site);
+    addedCount++;
+  });
+
+  updateDatasetBuilderUI();
+  alert(`Imported ${addedCount} checked station(s) into the Dataset Builder (Total: ${stagedDataset.length}).`);
+}
+
+function removeStagedSite(index) {
+  if (index >= 0 && index < stagedDataset.length) {
+    stagedDataset.splice(index, 1);
+    updateDatasetBuilderUI();
+  }
+}
+
+function clearStagedDataset() {
+  if (stagedDataset.length === 0) return;
+  if (confirm(`Remove all ${stagedDataset.length} staged sites from your dataset?`)) {
+    stagedDataset = [];
+    updateDatasetBuilderUI();
+  }
+}
+
+function updateDatasetBuilderUI() {
+  const radarCount = stagedDataset.filter(s => s.category === "RADAR").length;
+  const navaidCount = stagedDataset.filter(s => s.category === "NAVAID").length;
+  const totalCount = stagedDataset.length;
+
+  const rCountEl = document.getElementById("builderRadarCount");
+  if (rCountEl) rCountEl.textContent = radarCount;
+  const nCountEl = document.getElementById("builderNavaidCount");
+  if (nCountEl) nCountEl.textContent = navaidCount;
+  const tCountEl = document.getElementById("builderTotalCount");
+  if (tCountEl) tCountEl.textContent = totalCount;
+  const totalBadge = document.getElementById("stagedTotalBadge");
+  if (totalBadge) totalBadge.textContent = `${totalCount} Staged`;
+  const listCount = document.getElementById("stagedListCount");
+  if (listCount) listCount.textContent = totalCount;
+
+  // Coverage Tab Stage Buttons
+  const bCoverageCount = document.getElementById("btnStageCoverageCount");
+  if (bCoverageCount) bCoverageCount.textContent = selectedFacilityIds.size;
+  const impCoverageCount = document.getElementById("importCheckedCount");
+  if (impCoverageCount) impCoverageCount.textContent = selectedFacilityIds.size;
+
+  // Download buttons state
+  const btnRad = document.getElementById("btnDownloadRadars");
+  if (btnRad) {
+    btnRad.disabled = radarCount === 0;
+    btnRad.title = radarCount === 0 ? "No radars in dataset" : `Download ${radarCount} radars as CSV`;
+  }
+  const btnNav = document.getElementById("btnDownloadNavaids");
+  if (btnNav) {
+    btnNav.disabled = navaidCount === 0;
+    btnNav.title = navaidCount === 0 ? "No VOR/DME in dataset" : `Download ${navaidCount} VOR/DME as CSV`;
+  }
+
+  // Render Table List
+  const container = document.getElementById("stagedTableContainer");
+  if (container) {
+    if (totalCount === 0) {
+      container.innerHTML = `
+        <div style="color:var(--text-muted); font-size:11px; text-align:center; padding:12px;">
+          No sites staged yet. Click on the map, select existing stations, or click "➕ Add to Dataset Builder" in any station popup.
+        </div>
+      `;
+    } else {
+      let html = "";
+      stagedDataset.forEach((s, idx) => {
+        const isRadar = s.category === "RADAR";
+        const badgeClass = isRadar ? "staged-badge-radar" : "staged-badge-navaid";
+        const metaDetail = isRadar
+          ? `Mast: ${s.mast_height_m || 25}m AGL &middot; Range: ${s.range_nm}NM &middot; ${s.type} ${s.mode_s ? "(Mode S)" : ""}`
+          : `Elev: ${s.elevation_ft || 0}ft &middot; Range: ${s.range_nm}NM &middot; ${s.type} (${s.service_category || "ENROUTE"}) &middot; ${s.frequency_khz ? (s.frequency_khz / 1000).toFixed(2) + "MHz" : ""}`;
+
+        html += `
+          <div class="staged-item-card">
+            <div>
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span class="${badgeClass}">${isRadar ? "RADAR" : "VOR/DME"}</span>
+                <span style="font-weight:700; color:#fff; font-size:12px;">${s.ident}</span>
+                <span style="color:var(--text-bright); font-size:12px;">${s.name}</span>
+                <span style="color:var(--text-muted); font-size:10px;">(${s.country || "EU"})</span>
+              </div>
+              <div class="staged-item-meta">
+                ${s.latitude.toFixed(4)}&deg;N, ${s.longitude.toFixed(4)}&deg;E &middot; ${metaDetail}
+              </div>
+            </div>
+            <button class="btn-icon-delete" onclick="removeStagedSite(${idx})" title="Remove ${s.ident} from dataset">&times;</button>
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+  }
+
+  // Update CLI command preview
+  const cliBox = document.getElementById("cliCommandBox");
+  if (cliBox) {
+    let cmd = "# 1. Download your template files above\n# 2. Ingest into geodatabase (enriches with 25m EU-DEM & precalculates FL600 horizon):\n";
+    if (radarCount > 0) {
+      cmd += "python scripts/ingest_custom_data.py --file templates/radars_custom.csv --type RADAR\n";
+    }
+    if (navaidCount > 0) {
+      cmd += "python scripts/ingest_custom_data.py --file templates/navaids_custom.csv --type NAVAID\n";
+    }
+    if (radarCount === 0 && navaidCount === 0) {
+      cmd += "python scripts/ingest_custom_data.py --file templates/radars_template.csv --type RADAR\n";
+      cmd += "python scripts/ingest_custom_data.py --file templates/navaids_template.csv --type NAVAID\n";
+    }
+    cliBox.textContent = cmd.trim();
+  }
+
+  // Render Map Markers
+  renderDatasetBuilderMarkers();
+}
+
+function renderDatasetBuilderMarkers() {
+  if (!datasetBuilderLayerGroup) return;
+  datasetBuilderLayerGroup.clearLayers();
+
+  if (stagedDataset.length === 0) return;
+
+  const bounds = [];
+  stagedDataset.forEach((s, idx) => {
+    const isRadar = s.category === "RADAR";
+    const color = isRadar ? "#d29922" : "#1f6feb";
+    const iconSymbol = isRadar ? "🎯" : "📡";
+
+    const customIcon = L.divIcon({
+      className: "custom-builder-marker",
+      html: `
+        <div class="builder-marker-pin" style="background:${color};" title="${s.ident} (${s.name})">
+          ${iconSymbol}
+        </div>
+      `,
+      iconSize: [26, 26],
+      iconAnchor: [13, 13]
+    });
+
+    const marker = L.marker([s.latitude, s.longitude], { icon: customIcon }).addTo(datasetBuilderLayerGroup);
+    bounds.push([s.latitude, s.longitude]);
+
+    marker.bindPopup(`
+      <div style="font-size:12px;">
+        <b style="color:${color}; font-size:13px;">[${s.category}] ${s.ident} &middot; ${s.name}</b><br>
+        <b>Country:</b> ${s.country || "EU"}<br>
+        <b>Type:</b> ${s.type}<br>
+        <b>Coordinates:</b> ${s.latitude.toFixed(4)}&deg;N, ${s.longitude.toFixed(4)}&deg;E<br>
+        <b>Range:</b> ${s.range_nm} NM (${s.range_km || Math.round(s.range_nm * 1.852)} km)<br>
+        <b>${isRadar ? "Mast Height" : "Elevation"}:</b> ${isRadar ? (s.mast_height_m || 25) + "m AGL" : (s.elevation_ft || 0) + "ft AMSL"}<br>
+        <div style="margin-top:8px; border-top:1px solid #30363d; padding-top:6px;">
+          <button class="btn btn-secondary" style="font-size:11px; padding:3px 8px; width:100%; color:var(--accent-red);" onclick="removeStagedSite(${idx})">
+            ✕ Remove from Dataset
+          </button>
+        </div>
+      </div>
+    `);
+  });
+
+  // Fit bounds if in dataset builder tab
+  const builderTab = document.getElementById("tab-dataset-builder");
+  if (builderTab && builderTab.style.display !== "none" && bounds.length > 0) {
+    const latLngBounds = L.latLngBounds(bounds);
+    if (latLngBounds.isValid()) {
+      map.fitBounds(latLngBounds, { padding: [50, 50], maxZoom: 8 });
+    }
+  }
+}
+
+function generateRadarsCsv(radars) {
+  const lines = [
+    "ident,name,country,latitude,longitude,mast_height_m,range_nm,azimuth_start_deg,azimuth_end_deg,elevation_min_deg,elevation_max_deg,type,mode_s",
+    "# TEMPLATE GUIDE: Air Traffic Surveillance Radars (PSR, SSR, Mode S)",
+    "# Generated by EuroGeoCov Dataset Builder for CLI Ingestion via scripts/ingest_custom_data.py",
+    "#"
+  ];
+  radars.forEach(r => {
+    const ident = (r.ident || "RAD").trim().toUpperCase();
+    const name = (r.name || "Radar Station").replace(/,/g, " ").trim();
+    const country = (r.country || "EU").trim().toUpperCase().slice(0, 2);
+    const lat = Number(r.latitude || 0).toFixed(4);
+    const lon = Number(r.longitude || 0).toFixed(4);
+    const mastH = Number(r.mast_height_m || 25.0).toFixed(1);
+    const rng = Number(r.range_nm || 200.0).toFixed(1);
+    const azS = Number(r.azimuth_start_deg !== undefined ? r.azimuth_start_deg : 0.0).toFixed(1);
+    const azE = Number(r.azimuth_end_deg !== undefined ? r.azimuth_end_deg : 360.0).toFixed(1);
+    const elMin = Number(r.elevation_min_deg !== undefined ? r.elevation_min_deg : 0.5).toFixed(1);
+    const elMax = Number(r.elevation_max_deg !== undefined ? r.elevation_max_deg : 45.0).toFixed(1);
+    const typ = (r.type || "MODE-S").trim().toUpperCase();
+    const modeS = (r.mode_s === true || r.mode_s === "true" || r.mode_s === 1 || r.mode_s === "1") ? "true" : "false";
+    lines.push(`${ident},${name},${country},${lat},${lon},${mastH},${rng},${azS},${azE},${elMin},${elMax},${typ},${modeS}`);
+  });
+  return lines.join("\n") + "\n";
+}
+
+function generateNavaidsCsv(navaids) {
+  const lines = [
+    "ident,name,country,latitude,longitude,type,service_category,power,elevation_ft,frequency_khz,dme_channel,range_nm,elevation_max_deg",
+    "# TEMPLATE GUIDE: Radio Navigation Aids (VOR, DME, VORTAC, TACAN)",
+    "# Generated by EuroGeoCov Dataset Builder for CLI Ingestion via scripts/ingest_custom_data.py",
+    "#"
+  ];
+  navaids.forEach(n => {
+    const ident = (n.ident || "NAV").trim().toUpperCase();
+    const name = (n.name || "Navaid Station").replace(/,/g, " ").trim();
+    const country = (n.country || "EU").trim().toUpperCase().slice(0, 2);
+    const lat = Number(n.latitude || 0).toFixed(4);
+    const lon = Number(n.longitude || 0).toFixed(4);
+    const typ = (n.type || "VOR-DME").trim().toUpperCase();
+    const serviceCat = (n.service_category || (typ.includes("TMA") ? "TMA" : "ENROUTE")).trim().toUpperCase();
+    const power = (n.power || (serviceCat === "TMA" ? "LOW" : "HIGH")).trim().toUpperCase();
+    const rawElev = n.elevation_ft !== undefined ? n.elevation_ft : n.reported_elev_ft;
+    const elevFt = Math.round(Number(rawElev !== undefined ? rawElev : ((n.ground_elev_m || n.dem_elev_m || 0) * 3.28084)));
+    const freqKhz = Math.round(Number(n.frequency_khz || 115000));
+    const dmeCh = (n.dme_channel || "95X").trim().toUpperCase();
+    const rng = Number(n.range_nm || (serviceCat === "TMA" ? 40.0 : 130.0)).toFixed(1);
+    const elMax = Number(n.elevation_max_deg !== undefined ? n.elevation_max_deg : 60.0).toFixed(1);
+    lines.push(`${ident},${name},${country},${lat},${lon},${typ},${serviceCat},${power},${elevFt},${freqKhz},${dmeCh},${rng},${elMax}`);
+  });
+  return lines.join("\n") + "\n";
+}
+
+function downloadBlob(content, filename, mimeType = "text/csv;charset=utf-8;") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function downloadStagedDataset(category) {
+  const cat = (category || "RADAR").toUpperCase();
+  const items = stagedDataset.filter(s => s.category === cat);
+  if (items.length === 0) {
+    alert(`No ${cat === "RADAR" ? "Radars" : "VOR/DME"} in your staged dataset. Add or select stations first.`);
+    return;
+  }
+
+  const filename = cat === "RADAR" ? "radars_custom.csv" : "navaids_custom.csv";
+  const csvContent = cat === "RADAR" ? generateRadarsCsv(items) : generateNavaidsCsv(items);
+
+  downloadBlob(csvContent, filename);
+
+  const toast = document.createElement("div");
+  toast.style.cssText = "position:fixed; bottom:20px; right:20px; background:#3fb950; color:#fff; padding:10px 16px; border-radius:6px; font-size:12px; font-weight:600; z-index:9999; box-shadow:0 4px 12px rgba(0,0,0,0.4);";
+  toast.textContent = `✓ Downloaded ${filename} (${items.length} records ready for CLI ingestion)`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+function copyCliCommand() {
+  const cliBox = document.getElementById("cliCommandBox");
+  if (!cliBox) return;
+  navigator.clipboard.writeText(cliBox.textContent).then(() => {
+    const toast = document.createElement("div");
+    toast.style.cssText = "position:fixed; bottom:20px; right:20px; background:#1f6feb; color:#fff; padding:10px 16px; border-radius:6px; font-size:12px; font-weight:600; z-index:9999;";
+    toast.textContent = `✓ CLI command copied to clipboard!`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2500);
+  });
+}
+

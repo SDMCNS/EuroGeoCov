@@ -210,6 +210,59 @@ class TestAPI(unittest.TestCase):
         self.assertIsInstance(sample["station_breakdown"], list)
         self.assertEqual(len(sample["station_breakdown"]), 2)
 
+    def test_13_template_export_radars(self):
+        payload = {
+            "category": "RADAR",
+            "filename": "radars_custom.csv",
+            "facilities": [
+                {
+                    "ident": "RAD_ALPS",
+                    "name": "Alps Surveillance Node",
+                    "country": "CH",
+                    "latitude": 46.5000,
+                    "longitude": 8.0000,
+                    "mast_height_m": 30.0,
+                    "range_nm": 220.0,
+                    "type": "MODE-S",
+                    "mode_s": True
+                }
+            ]
+        }
+        res = self.client.post("/api/export/template", json=payload)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers["content-type"], "text/csv; charset=utf-8")
+        text = res.text
+        self.assertIn("ident,name,country,latitude,longitude,mast_height_m,range_nm", text)
+        self.assertIn("RAD_ALPS,Alps Surveillance Node,CH,46.5000,8.0000,30.0,220.0,0.0,360.0,0.5,45.0,MODE-S,true", text)
+
+    def test_14_template_export_navaids(self):
+        payload = {
+            "category": "NAVAID",
+            "filename": "navaids_custom.csv",
+            "facilities": [
+                {
+                    "ident": "GVA",
+                    "name": "Geneve Cointrin",
+                    "country": "CH",
+                    "latitude": 46.2514,
+                    "longitude": 6.1081,
+                    "type": "VOR-DME",
+                    "service_category": "TMA",
+                    "power": "LOW",
+                    "elevation_ft": 1410,
+                    "frequency_khz": 115750,
+                    "dme_channel": "104X",
+                    "range_nm": 40.0
+                }
+            ]
+        }
+        res = self.client.post("/api/export/template", json=payload)
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers["content-type"], "text/csv; charset=utf-8")
+        text = res.text
+        self.assertIn("ident,name,country,latitude,longitude,type,service_category,power,elevation_ft", text)
+        self.assertIn("GVA,Geneve Cointrin,CH,46.2514,6.1081,VOR-DME,TMA,LOW,1410,115750,104X,40.0,60.0", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -108,3 +108,9 @@ class CustomFacilityCreateRequest(BaseModel):
     dme_channel: Optional[str] = Field(None, description="DME channel (e.g. '108X')")
 
 
+class TemplateExportRequest(BaseModel):
+    category: str = Field("RADAR", description="'RADAR' or 'NAVAID'")
+    filename: Optional[str] = Field(None, description="Optional custom filename")
+    facilities: List[Dict[str, Any]] = Field(..., description="List of facility objects to format into template CSV")
+
+

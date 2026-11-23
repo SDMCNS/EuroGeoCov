@@ -58,7 +58,7 @@ geodata/
 │   ├── peaks_template.csv        # Template for mountain summits / relay sites
 │   ├── radars_template.csv       # Template for surveillance radars (PSR, SSR, Mode S)
 │   └── navaids_template.csv      # Template for radio navigation aids (VOR & DME)
-├── tests/                        # AUTOMATED TEST SUITE (38 tests)
+├── tests/                        # AUTOMATED TEST SUITE (40 tests)
 ├── data/                         # OUTPUT DATABASE & PRECALCULATED STATE (Git-ignored)
 │   ├── euro_geodatabase.duckdb   # DuckDB database file
 │   └── custom_facilities.json    # User-created stations
@@ -219,11 +219,16 @@ Open your browser to:
      - Antenna Cone of Silence dead cone geometry ($\theta_{\text{max}}$) and radius $r_{\text{cone}} = \frac{h - h_{\text{sta}}}{\tan \theta_{\text{max}}}$.
      - Friis Free Space Path Loss (FSPL) and ITU-R P.526 knife-edge obstacle diffraction loss $J(v)$.
      - Airspace voxelization, coverage floor, and multi-sensor redundancy tiers ($N$-Coverage).
-5. **Station Creator Tab**:
-   - Create custom stations directly from the UI with custom mast heights, ranges, and beam limits.
-   - "Click on Map" button to capture coordinates.
-   - Automatically queries EU-DEM for ground elevation and precalculates FL600 coverage.
-   - Instantly testable in the Conical Coverage and Airspace Cubes views.
+5. **Dataset Builder & CLI Exporter Tab (🛠️)**:
+   - **Interactive Map Site Placement**: Click anywhere on the map to place new candidate radar or VOR/DME sites, automatically extracting coordinates and EU-DEM ground elevations.
+   - **One-Click Map Staging**: Add existing facilities directly from map popups ("➕ Add to Dataset Builder") or batch import all active selected stations.
+   - **Live Network Overlay**: Visualizes the staged station network on the map with glowing radar (🎯) and navaid (📡) markers.
+   - **CLI Template Downloads**: Download pre-formatted CSV template files (`radars_custom.csv` and `navaids_custom.csv`) matching standard CLI ingestion requirements.
+   - **CLI Ingestion**: Copy and run the CLI command to enrich ground elevations and compute FL600 over-the-horizon profiles:
+     ```powershell
+     python scripts/ingest_custom_data.py --file templates/radars_custom.csv --type RADAR
+     python scripts/ingest_custom_data.py --file templates/navaids_custom.csv --type NAVAID
+     ```
 
 ---
 
@@ -233,6 +238,11 @@ Open your browser to:
 | :--- | :--- | :--- |
 | `/api/facilities` | `GET` | List/search all radars, navaids, custom stations, and peaks with country and category filters. |
 | `/api/facilities/coverage` | `GET` | Retrieve precalculated over-the-horizon coverage, radial cut spokes, and perimeters dynamically evaluated at any FL and range cap. |
+| `/api/facilities/countries` | `GET` | Summary breakdown of radars and navaids across ECAC countries. |
+| `/api/facilities/custom` | `GET` / `POST` | List or create custom user stations with automatic DEM enrichment and FL600 horizon precalc. |
+| `/api/facilities/custom/{id}` | `DELETE` | Delete a custom facility. |
+| `/api/export/template` | `POST` | Format and export a list of facilities as a CSV template ready for CLI ingestion. |
+| `/api/airspace/cube` | `POST` | Assess radio coverage at any single 1,000-ft cube in Earth's airspace. |
 | `/api/facilities/countries` | `GET` | Summary breakdown of radars and navaids across ECAC countries. |
 | `/api/facilities/custom` | `GET` / `POST` | List or create custom user stations with automatic DEM enrichment and FL600 horizon precalc. |
 | `/api/facilities/custom/{id}` | `DELETE` | Delete a custom station. |
@@ -247,7 +257,7 @@ Open your browser to:
 
 ## Verification & Automated Tests
 
-Run the full test suite (38 unit and integration tests):
+Run the full test suite (40 unit and integration tests):
 
 ```powershell
 python -m unittest discover tests

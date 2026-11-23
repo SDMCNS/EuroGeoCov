@@ -30,6 +30,7 @@
 
     <div class="nav-tabs">
       <button class="tab-btn active" onclick="switchTab('conical')">Radars &amp; Navaids Coverage</button>
+      <button class="tab-btn" onclick="switchTab('dataset-builder')">🛠️ Dataset Builder &amp; CLI Export</button>
       <button class="tab-btn" onclick="switchTab('los')">LoS &amp; Fresnel</button>
       <button class="tab-btn" onclick="switchTab('airspace')">Airspace 1000ft Cubes</button>
       <button class="tab-btn" onclick="switchTab('peaks')">Peaks Geodatabase</button>
@@ -248,6 +249,14 @@
             <button class="btn-chip" onclick="loadPresetFacilities('tma_london_paris')">London/Paris TMA</button>
           </div>
 
+          <!-- Quick Stage to Dataset Builder Button -->
+          <div style="margin-top: 8px;">
+            <button class="btn btn-secondary" style="width: 100%; font-size: 11px; padding: 6px 10px; display: flex; justify-content: center; align-items: center; gap: 6px;" onclick="importCheckedCoverageStationsToBuilder()">
+              <span>➕ Stage Selected in Dataset Builder</span>
+              <span id="btnStageCoverageCount" class="badge" style="font-size: 9px; padding: 0 5px; background: rgba(57,197,187,0.25); color: var(--accent-cyan);">0</span>
+            </button>
+          </div>
+
           <!-- Flight Level Dropdown (FL10 / 1000 ft steps) -->
           <div class="form-group" style="margin-top: 12px;">
             <label>Flight Level (FL10 / 1,000 ft increments)</label>
@@ -405,6 +414,238 @@
           <div id="multiStationStatsContent" style="font-size:12px; line-height:1.7;">
             <div>Select facilities above and click calculate.</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Tab: Dataset Builder & CLI Exporter -->
+      <div id="tab-dataset-builder" class="tab-content" style="display: none;">
+        <div class="panel-section">
+          <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>🛠️ Dataset Builder &amp; CLI Exporter</span>
+            <span id="stagedTotalBadge" class="badge" style="font-size:10px; background:rgba(63,185,80,0.2); color:var(--accent-green);">0 Staged</span>
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 10px; line-height: 1.5;">
+            Build a custom dataset of European VOR/DME navigation aids and surveillance radars by selecting existing stations on the map or clicking to place new candidate sites. Download standard CSV templates ready for CLI ingestion.
+          </p>
+
+          <!-- Live Summary Statistics -->
+          <div class="builder-stats-bar">
+            <div class="builder-stat-box">
+              <span class="builder-stat-label">Radars</span>
+              <span id="builderRadarCount" class="builder-stat-val" style="color:var(--accent-yellow);">0</span>
+            </div>
+            <div class="builder-stat-box">
+              <span class="builder-stat-label">VOR/DME</span>
+              <span id="builderNavaidCount" class="builder-stat-val" style="color:var(--accent-blue);">0</span>
+            </div>
+            <div class="builder-stat-box">
+              <span class="builder-stat-label">Total Sites</span>
+              <span id="builderTotalCount" class="builder-stat-val" style="color:var(--accent-green);">0</span>
+            </div>
+          </div>
+
+          <!-- Quick Download Action Buttons -->
+          <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+            <button class="btn" id="btnDownloadRadars" style="flex:1; min-width:140px; font-size:11px; padding:7px 10px; background:#d29922; border-color:#d29922; color:#fff;" onclick="downloadStagedDataset('RADAR')" disabled>
+              📥 Download Radars CSV
+            </button>
+            <button class="btn" id="btnDownloadNavaids" style="flex:1; min-width:140px; font-size:11px; padding:7px 10px; background:#1f6feb; border-color:#1f6feb; color:#fff;" onclick="downloadStagedDataset('NAVAID')" disabled>
+              📥 Download Navaids CSV
+            </button>
+          </div>
+        </div>
+
+        <!-- Site Source 1: Interactive Map Placement Form -->
+        <div class="panel-section">
+          <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>📍 Place New Site on Map</span>
+            <button class="btn-secondary" id="btnPickBuilderMap" style="padding: 2px 8px; font-size: 11px; width: auto;" onclick="enableBuilderMapPick()">Click on Map</button>
+          </div>
+          <p style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+            Click "Click on Map" to capture coordinates &amp; DEM ground elevation, or enter details below:
+          </p>
+
+          <div class="form-group">
+            <label>Facility Category</label>
+            <div style="display:flex; gap:12px; margin-top:4px;">
+              <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+                <input type="radio" name="builderCategory" value="RADAR" checked onchange="onBuilderCategoryChange()">
+                <span>🎯 Surveillance Radar</span>
+              </label>
+              <label style="font-size:12px; cursor:pointer; display:flex; align-items:center; gap:4px;">
+                <input type="radio" name="builderCategory" value="NAVAID" onchange="onBuilderCategoryChange()">
+                <span>📡 VOR / DME Navaid</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="row-2">
+            <div class="form-group">
+              <label>Ident / Code</label>
+              <input type="text" id="builderIdent" placeholder="e.g. RAD_ALPS, GVA" maxlength="10">
+            </div>
+            <div class="form-group">
+              <label>Country (ISO-2)</label>
+              <input type="text" id="builderCountry" placeholder="e.g. FR, CH, DE, ES" maxlength="2" style="text-transform:uppercase;">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Station Name</label>
+            <input type="text" id="builderName" placeholder="e.g. Mont Blanc Surveillance Node">
+          </div>
+
+          <div class="row-2">
+            <div class="form-group">
+              <label>Latitude (&deg;N)</label>
+              <input type="number" step="0.0001" id="builderLat" value="46.0000">
+            </div>
+            <div class="form-group">
+              <label>Longitude (&deg;E)</label>
+              <input type="number" step="0.0001" id="builderLon" value="8.0000">
+            </div>
+          </div>
+
+          <!-- Dynamic fields for Radar -->
+          <div id="builderRadarFields">
+            <div class="row-2">
+              <div class="form-group">
+                <label>Radar Equipment Type</label>
+                <select id="builderRadarType">
+                  <option value="MODE-S" selected>MODE-S (Enroute Mode S)</option>
+                  <option value="SSR">SSR (Secondary Surveillance)</option>
+                  <option value="PSR">PSR (Primary Surveillance)</option>
+                  <option value="ENR-MDS">ENR-MDS (Long-range Enroute)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Mast Height AGL (m)</label>
+                <input type="number" id="builderMastHeight" value="25" step="1">
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Designated Range (NM)</label>
+                <input type="number" id="builderRadarRange" value="200" step="5">
+              </div>
+              <div class="form-group">
+                <label>Mode S Capability</label>
+                <select id="builderModeS">
+                  <option value="true" selected>True (Mode S Interrogator)</option>
+                  <option value="false">False (Standard SSR/PSR)</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Beam Min / Max Elev (&deg;)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="builderRadarMinElev" value="0.5" step="0.1" title="Lower cutoff">
+                  <input type="number" id="builderRadarMaxElev" value="45.0" step="1.0" title="Cone of silence cutoff">
+                </div>
+              </div>
+              <div class="form-group">
+                <label>Azimuth Sector (&deg;)</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="builderRadarAzStart" value="0" step="1">
+                  <input type="number" id="builderRadarAzEnd" value="360" step="1">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Dynamic fields for Navaid -->
+          <div id="builderNavaidFields" style="display:none;">
+            <div class="row-2">
+              <div class="form-group">
+                <label>Navaid Type</label>
+                <select id="builderNavaidType" onchange="onBuilderNavaidTypeChange()">
+                  <option value="VOR-DME" selected>VOR-DME (Paired VOR &amp; DME)</option>
+                  <option value="DME">DME (Distance Measuring Eq)</option>
+                  <option value="VOR">VOR (VHF Omnidirectional)</option>
+                  <option value="TACAN">TACAN (Tactical Air Nav)</option>
+                  <option value="VORTAC">VORTAC (Collocated)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Service Category</label>
+                <select id="builderServiceCat" onchange="onBuilderServiceCatChange()">
+                  <option value="ENROUTE" selected>ENROUTE (Airway / High Power)</option>
+                  <option value="TMA">TMA (Terminal Area / Low Power)</option>
+                </select>
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Power Tier</label>
+                <select id="builderPower">
+                  <option value="HIGH" selected>HIGH (Enroute 130 NM)</option>
+                  <option value="LOW">LOW (TMA 25-40 NM)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Range (NM)</label>
+                <input type="number" id="builderNavaidRange" value="130" step="5">
+              </div>
+            </div>
+            <div class="row-2">
+              <div class="form-group">
+                <label>Site Elevation (ft AMSL)</label>
+                <input type="number" id="builderSiteElevFt" value="1200" step="10">
+              </div>
+              <div class="form-group">
+                <label>Frequency (kHz) / DME</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="builderFreqKhz" value="115000" step="50" placeholder="kHz">
+                  <input type="text" id="builderDmeChan" value="95X" placeholder="Ch">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button class="btn" style="margin-top:8px;" onclick="addCustomSiteToBuilder()">➕ Add Candidate Site to Dataset</button>
+        </div>
+
+        <!-- Site Source 2: Pick from ECAC Stations -->
+        <div class="panel-section">
+          <div class="section-title">🔍 Quick Add from ECAC Facilities</div>
+          <div class="form-group">
+            <select id="builderEcacSelect" style="width:100%;">
+              <option value="">-- Choose ECAC VOR/DME or Radar to add --</option>
+            </select>
+          </div>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <button class="btn btn-secondary" style="flex:1; font-size:11px;" onclick="addEcacStationToBuilder()">➕ Add Station</button>
+            <button class="btn btn-secondary" style="flex:1; font-size:11px;" onclick="importCheckedCoverageStationsToBuilder()">📥 Import Checked (<span id="importCheckedCount">0</span>)</button>
+          </div>
+        </div>
+
+        <!-- Staged Dataset Table -->
+        <div class="panel-section" style="padding: 10px;">
+          <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>📋 Staged Dataset (<span id="stagedListCount">0</span>)</span>
+            <button class="btn-link" style="color:var(--accent-red);" onclick="clearStagedDataset()">Clear All</button>
+          </div>
+
+          <div id="stagedTableContainer" style="max-height: 240px; overflow-y: auto; margin-top: 8px;">
+            <div style="color:var(--text-muted); font-size:11px; text-align:center; padding:12px;">
+              No sites staged yet. Click on the map, select existing stations, or click "➕ Add to Dataset Builder" in any station popup.
+            </div>
+          </div>
+        </div>
+
+        <!-- CLI Execution Command Box -->
+        <div class="panel-section">
+          <div class="section-title" style="display:flex; justify-content:space-between; align-items:center;">
+            <span>💻 CLI Ingestion Command</span>
+            <button class="btn-secondary" style="padding:2px 8px; font-size:10px; width:auto;" onclick="copyCliCommand()">📋 Copy</button>
+          </div>
+          <p style="font-size:11px; color:var(--text-muted); margin-bottom:6px;">
+            Run the ingestion pipeline in your terminal to calculate Snyder LAEA coordinates, query the 25m EU-DEM, and precalculate FL600 coverage:
+          </p>
+          <pre id="cliCommandBox" style="background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:10px; font-size:11px; color:var(--accent-cyan); overflow-x:auto; white-space:pre-wrap; line-height:1.5;"># Download your template above, then run:
+python scripts/ingest_custom_data.py --file templates/radars_template.csv --type RADAR
+python scripts/ingest_custom_data.py --file templates/navaids_template.csv --type NAVAID</pre>
         </div>
       </div>
 

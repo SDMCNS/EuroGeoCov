@@ -956,3 +956,109 @@ tr:hover {
   color: var(--accent-red);
   border: 1px solid var(--accent-red);
 }
+
+/* ==========================================================================
+   Dataset Builder & CLI Exporter Styles
+   ========================================================================== */
+.builder-stats-bar {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.builder-stat-box {
+  flex: 1;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.builder-stat-label {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.builder-stat-val {
+  display: block;
+  font-size: 15px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.staged-item-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: border-color 0.15s;
+}
+
+.staged-item-card:hover {
+  border-color: var(--accent-cyan);
+}
+
+.staged-item-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.staged-badge-radar {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(210, 153, 34, 0.25);
+  color: var(--accent-yellow);
+  border: 1px solid rgba(210, 153, 34, 0.4);
+}
+
+.staged-badge-navaid {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(88, 166, 255, 0.25);
+  color: var(--accent-blue);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+}
+
+.btn-icon-delete {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.btn-icon-delete:hover {
+  color: var(--accent-red);
+  background: rgba(248, 81, 73, 0.15);
+}
+
+.builder-marker-pin {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: #fff;
+  font-weight: 700;
+  font-size: 10px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.6);
+  border: 2px solid #fff;
+}
+
